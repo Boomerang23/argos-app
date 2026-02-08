@@ -13,37 +13,82 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 # --- CONFIGURATION ---
 API_URL = "https://argos-backend-kovx.onrender.com"
-st.set_page_config(page_title="ARGOS - KYC Platform", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="ARGOS - Gestion des Risques", page_icon="🛡️", layout="wide")
 
-# --- CSS (Design) ---
+# --- CSS (Design Pro) ---
 st.markdown("""
 <style>
-    .centered-title { text-align: center; }
-    [data-testid='stFileUploaderDropzoneInstructions'] > div > span {display: none;}
-    [data-testid='stFileUploaderDropzoneInstructions'] > div::after {content: "📂 Glissez et déposez votre fichier Excel ici"; font-size: 1.2rem; fontWeight: bold; visibility: visible; display: block;}
-    [data-testid='stFileUploaderDropzoneInstructions'] > div > small {display: none;}
-    [data-testid='stFileUploaderDropzoneInstructions'] > div::before {content: "Limite 200MB • Formats : XLSX, CSV"; font-size: 0.8rem; visibility: visible; display: block; marginBottom: 10px;}
-    [data-testid='stFileUploader'] section > button {color: transparent !important; position: relative;}
-    [data-testid='stFileUploader'] section > button::after {content: "Parcourir"; color: rgb(49, 51, 63); position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; alignItems: center; justifyContent: center; fontWeight: 600;}
     .main-header {font-size: 30px; font-weight: bold; color: #4B4B4B; text-align: center; margin-bottom: 20px;}
+    .stAlert {box-shadow: 2px 2px 5px rgba(0,0,0,0.1);}
+    div[data-testid="stMetricValue"] {font-size: 24px;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTION DE LA BASE DE DONNÉES LOCALE (Historique) ---
+# --- GESTION DE LA BASE DE DONNÉES LOCALE (Historique + Logs + Listes) ---
 def init_db():
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
+    
+    # Table Historique des recherches
     c.execute('''CREATE TABLE IF NOT EXISTS history
                  (date TEXT, client_name TEXT, status TEXT, details TEXT)''')
+    
+    # Table des Listes Personnalisées
+    c.execute('''CREATE TABLE IF NOT EXISTS custom_lists
+                 (name TEXT PRIMARY KEY)''')
+                 
+    # Table des Logs (Audit Trail)
+    c.execute('''CREATE TABLE IF NOT EXISTS audit_logs
+                 (timestamp TEXT, user TEXT, action TEXT, target TEXT, details TEXT)''')
+                 
     conn.commit()
     conn.close()
+
+# --- FONCTIONS DATABASE ---
+def log_action(user, action, target, details):
+    conn = sqlite3.connect('argos_history.db')
+    c = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?)", (now, user, action, target, details))
+    conn.commit()
+    conn.close()
+
+def get_logs():
+    conn = sqlite3.connect('argos_history.db')
+    df = pd.read_sql_query("SELECT * FROM audit_logs ORDER BY timestamp DESC", conn)
+    conn.close()
+    return df
+
+def get_all_lists():
+    # Listes par défaut
+    default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
+    
+    # Récupérer les listes perso
+    conn = sqlite3.connect('argos_history.db')
+    c = conn.cursor()
+    c.execute("SELECT name FROM custom_lists")
+    rows = c.fetchall()
+    conn.close()
+    
+    custom_lists = [r[0] for r in rows]
+    return default_lists + custom_lists
+
+def add_custom_list(name):
+    try:
+        conn = sqlite3.connect('argos_history.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO custom_lists VALUES (?)", (name,))
+        conn.commit()
+        conn.close()
+        return True
+    except:
+        return False
 
 def save_scan(client_name, status, details):
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d")
-    c.execute("INSERT INTO history (date, client_name, status, details) VALUES (?, ?, ?, ?)",
-              (now, client_name, status, details))
+    c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", (now, client_name, status, details))
     conn.commit()
     conn.close()
 
@@ -67,14 +112,8 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
     c.drawString(50, height - 210, f"Client : {client_name}"); c.drawString(50, height - 230, f"ID : {client_id}")
-    
-    if status == "ELEVE" or "ALERTE" in str(status): 
-        color = colors.red
-        text_status = "REJETÉ / ALERTE"
-    else: 
-        color = colors.green
-        text_status = "VÉRIFIÉ / CONFORME"
-        
+    if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
+    else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
     c.setFillColor(color); c.setFont("Helvetica-Bold", 16); c.drawString(50, height - 280, f"STATUT : {text_status}")
     c.setFillColor(colors.black); c.setFont("Helvetica", 12); c.drawString(50, height - 310, f"Détail : {risk_details}")
     c.save(); buffer.seek(0)
@@ -87,19 +126,12 @@ def create_global_report(dataframe):
     styles = getSampleStyleSheet()
     elements.append(Paragraph("<b>Rapport Global de Conformité</b>", styles['Title']))
     elements.append(Spacer(1, 12))
-    
-    # Correction statuts pour le PDF global
     rejected = len(dataframe[dataframe['Statut'].str.contains("REJETÉ") | dataframe['Statut'].str.contains("ALERTE")])
-    total = len(dataframe)
-    compliant = total - rejected
-    
+    total = len(dataframe); compliant = total - rejected
     stats_text = f"Date : {datetime.now().strftime('%d/%m/%Y')}<br/>Total : {total} | Conformes : {compliant} | <b>Alertes : {rejected}</b>"
     elements.append(Paragraph(stats_text, styles['Normal'])); elements.append(Spacer(1, 20))
-    
     data = [["Nom du Client", "ID National", "Statut", "Détail"]]
-    for index, row in dataframe.iterrows(): 
-        data.append([str(row['Nom']), str(row['ID']), str(row['Statut']), str(row['Détail'])])
-        
+    for index, row in dataframe.iterrows(): data.append([str(row['Nom']), str(row['ID']), str(row['Statut']), str(row['Détail'])])
     table = Table(data)
     table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -107,18 +139,18 @@ def create_global_report(dataframe):
     elements.append(table); doc.build(elements); buffer.seek(0)
     return buffer
 
-# --- TITRE PRINCIPAL ---
-st.markdown("<h1 style='text-align: center;'>👁️ ARGOS KYC 👁️</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center;'>Plateforme de Vérification d'Identité</h3>", unsafe_allow_html=True)
+# --- TITRE ---
+st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360°</h1>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align: center;'>Système de Gestion des Listes & KYC</h4>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- GESTION DE SESSION & LOGIN ---
+# --- LOGIN ---
 if "token" not in st.session_state: st.session_state["token"] = None
+if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/9370/9370273.png", width=50)
-    st.header("🔐 Accès Agent")
-    
+    st.header("🔐 Accès Sécurisé")
     if st.session_state["token"] is None:
         email = st.text_input("Email", "admin@sgi.ci")
         password = st.text_input("Mot de passe", type="password")
@@ -127,193 +159,192 @@ with st.sidebar:
                 res = requests.post(f"{API_URL}/token", data={"username": email, "password": password})
                 if res.status_code == 200: 
                     st.session_state["token"] = res.json().get("access_token")
+                    st.session_state["user_email"] = email
                     st.success("Connecté")
                     st.rerun()
-                else: 
-                    st.error("Identifiants incorrects")
-            except Exception as e: 
-                st.error(f"Erreur connexion: {e}")
+                else: st.error("Erreur d'identification")
+            except: st.error("Serveur inaccessible")
     else:
-        st.success("🟢 Agent Connecté")
-        if st.button("Se déconnecter", key="logout"): 
+        st.success(f"👤 {st.session_state['user_email']}")
+        if st.button("Se déconnecter"): 
             st.session_state["token"] = None
+            st.session_state["user_email"] = ""
             st.rerun()
 
-# --- APPLICATION PRINCIPALE ---
+# --- APP ---
 if st.session_state["token"]:
-    
-    # === MENU DE NAVIGATION ===
-    # J'ai ajouté ce menu pour basculer entre les vues
-    menu = st.sidebar.radio("Navigation", ["📊 Tableau de Bord", "🔍 Vérifications", "👮 Administration"])
-
-    # HEADER TOKEN
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
+    
+    # NAVIGATION
+    menu = st.sidebar.radio("Menu", ["📊 Tableau de Bord", "🔍 Vérifications", "⚙️ Gestion des Listes"])
 
-    # ==========================
-    # VUE 1 : TABLEAU DE BORD
-    # ==========================
+    # === TABLEAU DE BORD ===
     if menu == "📊 Tableau de Bord":
-        st.markdown("### 📊 Statistiques en Temps Réel")
-        df_history = load_stats()
-        
-        if df_history.empty:
-            st.info("👋 Bienvenue ! Aucune donnée pour l'instant. Lancez une vérification pour activer le tableau de bord.")
+        st.subheader("Vue d'ensemble")
+        df = load_stats()
+        if not df.empty:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Vérifications Totales", len(df))
+            c2.metric("✅ Conformes", len(df) - len(df[df['status'].str.contains('ALERTE')]))
+            c3.metric("🚨 Alertes", len(df[df['status'].str.contains('ALERTE')]))
+            
+            g1, g2 = st.columns(2)
+            with g1: st.plotly_chart(px.pie(df, names='status', title='Ratio Conformité', color_discrete_sequence=['green', 'red']), use_container_width=True)
+            with g2: st.plotly_chart(px.bar(df, x='date', title='Volume Quotidien'), use_container_width=True)
         else:
-            total_scan = len(df_history)
-            total_alertes = len(df_history[df_history['status'].str.contains('ALERTE')])
-            total_ok = total_scan - total_alertes
+            st.info("Aucune donnée disponible.")
+
+    # === VÉRIFICATIONS ===
+    elif menu == "🔍 Vérifications":
+        t1, t2 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)"])
+        
+        with t1:
+            st.write("Scan rapide d'un individu.")
+            col1, col2 = st.columns(2)
+            with col1: name = st.text_input("Nom Complet")
+            with col2: nid = st.text_input("ID / Matricule")
             
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Total Historique", total_scan)
-            k2.metric("✅ Validés", total_ok)
-            k3.metric("🚨 Alertes", total_alertes, delta_color="inverse")
+            if st.button("Lancer Scan", type="primary"):
+                if name:
+                    try:
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
+                        if r.status_code == 200:
+                            d = r.json()
+                            risk = d.get("risk_score")
+                            status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
+                            if status == "ALERTE": st.error(f"🚨 RISQUE ÉLEVÉ DÉTECTÉ: {name}"); details = d.get('details', 'N/A')
+                            else: st.success(f"✅ RAS - Client Conforme"); details = "RAS"
+                            
+                            save_scan(name, status, details)
+                            log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
+                            
+                            pdf = create_kyc_pdf(name, nid, status, details)
+                            st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
+                    except Exception as e: st.error(f"Erreur: {e}")
+
+        with t2:
+            st.write("Scan de liste clients (Excel/CSV).")
+            upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
+            if upl and st.button("Scanner Liste"):
+                df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
+                res = []
+                bar = st.progress(0)
+                for i, row in df.iterrows():
+                    n = row.get('Nom', row.get('Name', 'Inconnu'))
+                    try:
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": "BULK", "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
+                        rk = r.json().get("risk_score", "Low")
+                        stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
+                        res.append({"Nom": n, "Statut": stt, "Détail": r.json().get("details", "")})
+                        save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
+                    except: res.append({"Nom": n, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                    bar.progress((i+1)/len(df))
+                
+                fin = pd.DataFrame(res)
+                st.dataframe(fin)
+                log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
+                st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
+
+    # === GESTION DES LISTES (NOUVEAU) ===
+    elif menu == "⚙️ Gestion des Listes":
+        st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
+        
+        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier (Update)", "➕ Créer une Liste", "📜 Logs (Audit)"])
+
+        # 1. ENTRÉE MANUELLE
+        with tabs[0]:
+            st.info("Ajouter individuellement une personne à une liste locale.")
             
-            st.markdown("---")
+            # On récupère toutes les listes
+            all_lists = get_all_lists()
+            # On FILTRE pour enlever "Listes Internationales" (Règle métier)
+            manual_lists = [L for L in all_lists if L != "Listes Internationales"]
+            
             c1, c2 = st.columns(2)
             with c1:
-                fig_pie = px.pie(df_history, names='status', title='Répartition des Risques', hole=0.4, 
-                                 color='status', color_discrete_map={'CONFORME':'green', 'ALERTE':'red'})
-                st.plotly_chart(fig_pie, use_container_width=True)
+                target_list = st.selectbox("Choisir la Liste cible", manual_lists)
+                bad_name = st.text_input("Nom de la personne / Entité")
             with c2:
-                df_bar = df_history.groupby('date').size().reset_index(name='counts')
-                fig_bar = px.bar(df_bar, x='date', y='counts', title='Activité Journalière')
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-    # ==========================
-    # VUE 2 : VÉRIFICATIONS (Unitaire & Masse)
-    # ==========================
-    elif menu == "🔍 Vérifications":
-        tab1, tab2 = st.tabs(["👤 Vérification Unitaire", "📂 Scan de Masse (Excel)"])
-
-        # UNITAIRE
-        with tab1:
-            st.info("Saisie manuelle pour vérification immédiate.")
-            c1, c2 = st.columns(2)
-            with c1: full_name = st.text_input("Nom & Prénoms"); national_id = st.text_input("Numéro de Pièce")
-            with c2: entity_type = st.selectbox("Type", ["Physique", "Morale"]); country = st.text_input("Pays", "Côte d'Ivoire")
+                risk_type = st.selectbox("Type de Risque", ["PEP (Politiquement Exposé)", "Sanction", "Terrorisme", "Fraude", "Autre"])
+                details = st.text_input("Motif / Détails")
             
-            if st.button("🔍 Vérifier", type="primary", key="check_unit"):
-                if full_name and national_id:
+            if st.button("Ajouter à la liste", type="primary"):
+                if bad_name and target_list:
+                    # On envoie au Backend, en précisant la LISTE dans les détails
+                    full_details = f"[{target_list}] {risk_type}: {details}"
+                    payload = {"name": bad_name, "risk_level": "High", "details": full_details}
+                    
                     try:
-                        res = requests.post(f"{API_URL}/clients/", json={"full_name": full_name, "entity_type": entity_type, "national_id": national_id, "country_residence": country, "tenant_id": "MANUAL"}, headers=headers)
-                        
-                        if res.status_code == 200:
-                            data = res.json()
-                            risk = data.get("risk_score")
-                            
-                            # Logique d'affichage
-                            if risk == "ELEVE" or risk == "High":
-                                st.error(f"🚨 ALERTE : {full_name} est REJETÉ.")
-                                txt_risk = "Sanctions / PEP / Blacklist"
-                                status_db = "ALERTE"
-                                pdf_status = "ELEVE"
-                            else:
-                                st.success(f"✅ CONFORME : {full_name}.")
-                                txt_risk = "RAS"
-                                status_db = "CONFORME"
-                                pdf_status = "FAIBLE"
-                            
-                            # Sauvegarde locale
-                            save_scan(full_name, status_db, txt_risk)
-                            
-                            # Affichage détails si alerte
-                            if status_db == "ALERTE":
-                                st.warning(f"Détails de l'alerte : {data.get('details', 'N/A')}")
-                            
-                            # PDF
-                            pdf = create_kyc_pdf(full_name, national_id, pdf_status, txt_risk)
-                            st.download_button("📄 Télécharger Rapport (PDF)", pdf, f"Rapport_{full_name}.pdf", "application/pdf")
-                            
+                        r = requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                        if r.status_code == 200:
+                            st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
+                            log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
                         else:
-                            st.error(f"Erreur API: {res.status_code}")
-                            
-                    except Exception as e: st.error(f"Erreur de connexion: {e}")
+                            st.error("Erreur serveur.")
+                    except Exception as e: st.error(f"Erreur: {e}")
+                else:
+                    st.warning("Veuillez remplir le nom et choisir une liste.")
 
-        # BULK (EXCEL)
-        with tab2:
-            st.info("Importez un fichier Excel ou CSV pour analyser une liste de clients.")
-            upl = st.file_uploader("Fichier", type=["xlsx", "csv"])
-            if upl:
-                try:
-                    df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
-                    st.dataframe(df.head())
-                    
-                    if st.button("🚀 Lancer le Scan de Masse", key="bulk_scan"):
-                        results = []
-                        bar = st.progress(0)
-                        
-                        for i, row in df.iterrows():
-                            # Gestion flexible des noms de colonnes
-                            nom = row.get('Nom') or row.get('Name') or row.get('full_name') or "Inconnu"
-                            nid = row.get('ID') or row.get('National_ID') or f"BULK-{i}"
-                            
-                            if nom != "Inconnu":
-                                try:
-                                    r = requests.post(f"{API_URL}/clients/", json={"full_name": str(nom), "entity_type": "Physique", "national_id": str(nid), "country_residence": "Inconnu", "tenant_id": "BULK"}, headers=headers)
-                                    res_json = r.json() if r.status_code == 200 else {}
-                                    
-                                    risk = res_json.get("risk_score")
-                                    if risk == "ELEVE" or risk == "High":
-                                        stat = "🔴 REJETÉ"; db_stat = "ALERTE"; det = "Sanctionné"
-                                    else:
-                                        stat = "🟢 CONFORME"; db_stat = "CONFORME"; det = "RAS"
-                                except:
-                                    stat = "⚠️ ERREUR"; db_stat = "ERREUR"; det = "Erreur Technique"
-                                
-                                results.append({"Nom": nom, "ID": nid, "Statut": stat, "Détail": det})
-                                save_scan(str(nom), db_stat, det)
-                            
-                            bar.progress((i + 1) / len(df))
-                        
-                        st.success("Analyse terminée !")
-                        final_df = pd.DataFrame(results)
-                        st.dataframe(final_df)
-                        
-                        c1, c2 = st.columns(2)
-                        with c1: st.download_button("📥 Télécharger CSV", final_df.to_csv(index=False).encode('utf-8'), "resultats_kyc.csv", "text/csv")
-                        with c2: st.download_button("📄 Télécharger PDF Global", create_global_report(final_df), "Rapport_Global.pdf", "application/pdf", type="primary")
-                        st.balloons()
-                except Exception as e: st.error(f"Erreur de lecture du fichier : {e}")
-
-    # ==========================
-    # VUE 3 : ADMINISTRATION (NOUVEAU !)
-    # ==========================
-    elif menu == "👮 Administration":
-        st.markdown("### 👮 Gestion de la Liste Noire (Blacklist)")
-        st.warning("⚠️ Zone réservée aux administrateurs. Les profils ajoutés ici seront marqués comme 'Risque Élevé' lors des vérifications.")
-        
-        with st.form("add_risk_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                bad_name = st.text_input("Nom de la personne à signaler")
-                risk_type = st.selectbox("Type de Risque", ["Terrorisme", "Blanchiment", "Fraude", "Personne Politiquement Exposée (PEP)", "Autre"])
-            with col2:
-                details = st.text_area("Détails / Motif du signalement")
-                
-            submit = st.form_submit_button("AJOUTER À LA LISTE ROUGE 🔴", use_container_width=True)
+        # 2. IMPORT FICHIER (Toutes listes)
+        with tabs[1]:
+            st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
             
-            if submit and bad_name:
-                # Payload conforme à ton Backend FastAPI (models.py)
-                payload = {
-                    "name": bad_name,
-                    "risk_level": "High",
-                    "details": f"{risk_type}: {details}"
-                }
-                
+            # Ici, TOUTES les listes sont dispos
+            target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
+            
+            upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
+            
+            if upl_file and st.button("Importer les données 📥"):
                 try:
-                    # On envoie la requête au Backend
-                    response = requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                    df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
+                    st.write(f"Aperçu ({len(df)} entrées) :")
+                    st.dataframe(df.head(3))
                     
-                    if response.status_code == 200:
-                        st.success(f"✅ Le profil '{bad_name}' a été ajouté avec succès à la base de données criminelle !")
-                    elif response.status_code == 401:
-                        st.error("⛔ Session expirée. Veuillez vous reconnecter.")
-                    else:
-                        st.error(f"❌ Erreur serveur : {response.status_code}")
+                    # Simulation de l'import (Boucle vers Backend)
+                    progress = st.progress(0)
+                    count_ok = 0
+                    
+                    for i, row in df.iterrows():
+                        # On essaie de trouver la colonne Nom
+                        name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
+                        if name_val != "Inconnu":
+                            full_details = f"[{target_list_import}] IMPORT FICHIER"
+                            payload = {"name": str(name_val), "risk_level": "High", "details": full_details}
+                            requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                            count_ok += 1
+                        progress.progress((i+1)/len(df))
+                    
+                    st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
+                    log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name} ({count_ok} items)")
+                    
                 except Exception as e:
-                    st.error(f"❌ Erreur technique : {e}")
+                    st.error(f"Erreur de lecture : {e}")
+
+        # 3. CRÉER LISTE
+        with tabs[2]:
+            st.write("Définir une nouvelle catégorie de liste.")
+            new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
+            
+            if st.button("Créer la Liste"):
+                if new_list_name:
+                    if new_list_name in get_all_lists():
+                        st.warning("Cette liste existe déjà.")
+                    else:
+                        if add_custom_list(new_list_name):
+                            st.success(f"Liste '{new_list_name}' créée !")
+                            log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
+                            st.rerun() # Pour mettre à jour les selectbox
+                        else:
+                            st.error("Erreur base de données locale.")
+
+        # 4. LOGS
+        with tabs[3]:
+            st.write("Historique des actions administratives.")
+            df_logs = get_logs()
+            st.dataframe(df_logs, use_container_width=True)
+            
+            if st.button("Rafraîchir les logs"):
+                st.rerun()
 
 else:
-    # Écran d'accueil si non connecté
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.info("🔒 Veuillez vous connecter via le panneau latéral (à gauche) pour accéder à la plateforme.")
+    st.info("Veuillez vous connecter.")
