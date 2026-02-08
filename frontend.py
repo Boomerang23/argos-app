@@ -12,7 +12,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 
 # --- CONFIGURATION ---
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://argos-backend-kovx.onrender.com"
 st.set_page_config(page_title="ARGOS - KYC Platform", page_icon="🆔", layout="wide")
 
 # --- CSS (Design) ---
@@ -219,4 +219,5 @@ if st.session_state["token"]:
                     with c2: st.download_button("📄 PDF Global", create_global_report(final_df), "Rapport_Global.pdf", "application/pdf", type="primary")
                     st.balloons()
             except Exception as e: st.error(f"Erreur fichier : {e}")
+
 else: st.warning("Veuillez vous connecter.")
