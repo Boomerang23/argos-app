@@ -14,5 +14,6 @@ requests
 pandas
 plotly
 reportlab
-bcrypt==4.0.1
+
 openpyxl
+
