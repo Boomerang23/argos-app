@@ -202,4 +202,149 @@ if st.session_state["token"]:
             st.write("Scan rapide d'un individu.")
             col1, col2 = st.columns(2)
             with col1: name = st.text_input("Nom Complet")
-            with col2: nid = st.text_input("ID / Matric
+            with col2: nid = st.text_input("ID / Matricule")
+            
+            if st.button("Lancer Scan", type="primary"):
+                if name:
+                    try:
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
+                        if r.status_code == 200:
+                            d = r.json()
+                            risk = d.get("risk_score")
+                            status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
+                            if status == "ALERTE": st.error(f"🚨 RISQUE ÉLEVÉ DÉTECTÉ: {name}"); details = d.get('details', 'N/A')
+                            else: st.success(f"✅ RAS - Client Conforme"); details = "RAS"
+                            
+                            save_scan(name, status, details)
+                            log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
+                            
+                            pdf = create_kyc_pdf(name, nid, status, details)
+                            st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
+                    except Exception as e: st.error(f"Erreur: {e}")
+
+        with t2:
+            st.write("Scan de liste clients (Excel/CSV).")
+            upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
+            if upl and st.button("Scanner Liste"):
+                df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
+                res = []
+                bar = st.progress(0)
+                for i, row in df.iterrows():
+                    n = row.get('Nom', row.get('Name', 'Inconnu'))
+                    try:
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": "BULK", "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
+                        rk = r.json().get("risk_score", "Low")
+                        stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
+                        res.append({"Nom": n, "Statut": stt, "Détail": r.json().get("details", "")})
+                        save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
+                    except: res.append({"Nom": n, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                    bar.progress((i+1)/len(df))
+                
+                fin = pd.DataFrame(res)
+                st.dataframe(fin)
+                log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
+                st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
+
+    # === GESTION DES LISTES (NOUVEAU) ===
+    elif menu == "⚙️ Gestion des Listes":
+        st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
+        
+        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier (Update)", "➕ Créer une Liste", "📜 Logs (Audit)"])
+
+        # 1. ENTRÉE MANUELLE
+        with tabs[0]:
+            st.info("Ajouter individuellement une personne à une liste locale.")
+            
+            # On récupère toutes les listes
+            all_lists = get_all_lists()
+            # On FILTRE pour enlever "Listes Internationales" (Règle métier)
+            manual_lists = [L for L in all_lists if L != "Listes Internationales"]
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                target_list = st.selectbox("Choisir la Liste cible", manual_lists)
+                bad_name = st.text_input("Nom de la personne / Entité")
+            with c2:
+                # MODIFICATION ICI : Suppression du Dropdown 'Type de Risque'
+                details = st.text_input("Motif / Détails")
+            
+            if st.button("Ajouter à la liste", type="primary"):
+                if bad_name and target_list:
+                    # On envoie au Backend, en précisant la LISTE dans les détails
+                    full_details = f"[{target_list}] {details}"
+                    payload = {"name": bad_name, "risk_level": "High", "details": full_details}
+                    
+                    try:
+                        r = requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                        if r.status_code == 200:
+                            st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
+                            log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
+                        else:
+                            st.error("Erreur serveur.")
+                    except Exception as e: st.error(f"Erreur: {e}")
+                else:
+                    st.warning("Veuillez remplir le nom et choisir une liste.")
+
+        # 2. IMPORT FICHIER (Toutes listes)
+        with tabs[1]:
+            st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
+            
+            # Ici, TOUTES les listes sont dispos
+            target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
+            
+            upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
+            
+            if upl_file and st.button("Importer les données 📥"):
+                try:
+                    df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
+                    st.write(f"Aperçu ({len(df)} entrées) :")
+                    st.dataframe(df.head(3))
+                    
+                    # Simulation de l'import (Boucle vers Backend)
+                    progress = st.progress(0)
+                    count_ok = 0
+                    
+                    for i, row in df.iterrows():
+                        # On essaie de trouver la colonne Nom
+                        name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
+                        if name_val != "Inconnu":
+                            full_details = f"[{target_list_import}] IMPORT FICHIER"
+                            payload = {"name": str(name_val), "risk_level": "High", "details": full_details}
+                            requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                            count_ok += 1
+                        progress.progress((i+1)/len(df))
+                    
+                    st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
+                    log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name} ({count_ok} items)")
+                    
+                except Exception as e:
+                    st.error(f"Erreur de lecture : {e}")
+
+        # 3. CRÉER LISTE
+        with tabs[2]:
+            st.write("Définir une nouvelle catégorie de liste.")
+            new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
+            
+            if st.button("Créer la Liste"):
+                if new_list_name:
+                    if new_list_name in get_all_lists():
+                        st.warning("Cette liste existe déjà.")
+                    else:
+                        if add_custom_list(new_list_name):
+                            st.success(f"Liste '{new_list_name}' créée !")
+                            log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
+                            st.rerun() # Pour mettre à jour les selectbox
+                        else:
+                            st.error("Erreur base de données locale.")
+
+        # 4. LOGS
+        with tabs[3]:
+            st.write("Historique des actions administratives.")
+            df_logs = get_logs()
+            st.dataframe(df_logs, use_container_width=True)
+            
+            if st.button("Rafraîchir les logs"):
+                st.rerun()
+
+else:
+    st.info("Veuillez vous connecter.")
