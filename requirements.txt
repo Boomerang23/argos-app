@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic[email]
+python-dotenv
+passlib[bcrypt]
+thefuzz
+python-Levenshtein
+python-jose[cryptography]
+python-multipart
+streamlit
+requests
+pandas
+plotly
+reportlab
+openpyxl
