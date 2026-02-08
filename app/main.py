@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from . import models, schemas, database
 
+
 # Création automatique des tables (pour le dev, à remplacer par Alembic en prod)
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -102,4 +103,23 @@ def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(databas
         "input_name": request.name,
         "matches": matches,
         "risk_level": risk
+
     }
+
+# --- INITIALISATION AUTOMATIQUE ---
+@app.on_event("startup")
+def create_admin_user():
+    db = SessionLocal()
+    # On crée les tables si elles n'existent pas
+    models.Base.metadata.create_all(bind=engine)
+    
+    # On vérifie si l'admin existe déjà
+    user = db.query(models.User).filter(models.User.email == "admin@sgi.ci").first()
+    if not user:
+        print("⚠️ Création de l'utilisateur ADMIN...")
+        hashed_password = auth.get_password_hash("admin")
+        db_user = models.User(email="admin@sgi.ci", hashed_password=hashed_password)
+        db.add(db_user)
+        db.commit()
+        print("✅ Admin créé avec succès !")
+    db.close()
