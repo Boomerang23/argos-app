@@ -1,8 +1,8 @@
-from fastapi.security import OAuth2PasswordRequestForm
-from . import auth
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from . import models, schemas, database
+from . import models, schemas, database, auth
+from .database import SessionLocal, engine
 
 
 # Création automatique des tables (pour le dev, à remplacer par Alembic en prod)
@@ -123,3 +123,4 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
