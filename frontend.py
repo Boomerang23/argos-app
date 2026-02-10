@@ -28,23 +28,15 @@ st.markdown("""
 def init_db():
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
-    
-    # Table Historique des recherches
     c.execute('''CREATE TABLE IF NOT EXISTS history
                  (date TEXT, client_name TEXT, status TEXT, details TEXT)''')
-    
-    # Table des Listes Personnalisées
     c.execute('''CREATE TABLE IF NOT EXISTS custom_lists
                  (name TEXT PRIMARY KEY)''')
-                 
-    # Table des Logs (Audit Trail)
     c.execute('''CREATE TABLE IF NOT EXISTS audit_logs
                  (timestamp TEXT, user TEXT, action TEXT, target TEXT, details TEXT)''')
-                 
     conn.commit()
     conn.close()
 
-# --- FONCTIONS DATABASE ---
 def log_action(user, action, target, details):
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
@@ -60,16 +52,12 @@ def get_logs():
     return df
 
 def get_all_lists():
-    # Listes par défaut
     default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
-    
-    # Récupérer les listes perso
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
     c.execute("SELECT name FROM custom_lists")
     rows = c.fetchall()
     conn.close()
-    
     custom_lists = [r[0] for r in rows]
     return default_lists + custom_lists
 
@@ -144,26 +132,35 @@ st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", 
 st.markdown("<h4 style='text-align: center;'>Système de Gestion des référentiels KYC</h4>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- LOGIN ---
+# --- LOGIN (CORRIGÉ AVEC FORMULAIRE) ---
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/9370/9370273.png", width=50)
     st.header("🔐 Accès Sécurisé")
+    
+    # Si NON connecté : on affiche le formulaire
     if st.session_state["token"] is None:
-        email = st.text_input("Email", "admin@sgi.ci")
-        password = st.text_input("Mot de passe", type="password")
-        if st.button("Se connecter", key="login_btn"):
+        with st.form("login_form"):
+            email = st.text_input("Email", "admin@sgi.ci")
+            password = st.text_input("Mot de passe", type="password")
+            submit = st.form_submit_button("Se connecter")
+            
+        if submit:
             try:
                 res = requests.post(f"{API_URL}/token", data={"username": email, "password": password})
                 if res.status_code == 200: 
                     st.session_state["token"] = res.json().get("access_token")
                     st.session_state["user_email"] = email
-                    st.success("Connecté")
+                    st.success("✅ Connexion réussie !")
                     st.rerun()
-                else: st.error("Erreur d'identification")
-            except: st.error("Serveur inaccessible")
+                else: 
+                    st.error("❌ Identifiants incorrects")
+            except Exception as e:
+                st.error("⛔ Serveur inaccessible (Réveil en cours...)")
+    
+    # Si CONNECTÉ : on affiche le bouton logout
     else:
         st.success(f"👤 {st.session_state['user_email']}")
         if st.button("Se déconnecter"): 
@@ -171,7 +168,7 @@ with st.sidebar:
             st.session_state["user_email"] = ""
             st.rerun()
 
-# --- APP ---
+# --- APP PRINCIPALE ---
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
@@ -245,7 +242,7 @@ if st.session_state["token"]:
                 log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
                 st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
 
-    # === GESTION DES LISTES (NOUVEAU) ===
+    # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
         
@@ -254,10 +251,7 @@ if st.session_state["token"]:
         # 1. ENTRÉE MANUELLE
         with tabs[0]:
             st.info("Ajouter individuellement une personne à une liste locale.")
-            
-            # On récupère toutes les listes
             all_lists = get_all_lists()
-            # On FILTRE pour enlever "Listes Internationales" (Règle métier)
             manual_lists = [L for L in all_lists if L != "Listes Internationales"]
             
             c1, c2 = st.columns(2)
@@ -265,33 +259,25 @@ if st.session_state["token"]:
                 target_list = st.selectbox("Choisir la Liste cible", manual_lists)
                 bad_name = st.text_input("Nom de la personne / Entité")
             with c2:
-                # MODIFICATION ICI : Suppression du Dropdown 'Type de Risque'
                 details = st.text_input("Motif / Détails")
             
             if st.button("Ajouter à la liste", type="primary"):
                 if bad_name and target_list:
-                    # On envoie au Backend, en précisant la LISTE dans les détails
                     full_details = f"[{target_list}] {details}"
                     payload = {"name": bad_name, "risk_level": "High", "details": full_details}
-                    
                     try:
                         r = requests.post(f"{API_URL}/people/", json=payload, headers=headers)
                         if r.status_code == 200:
                             st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
                             log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
-                        else:
-                            st.error("Erreur serveur.")
+                        else: st.error("Erreur serveur.")
                     except Exception as e: st.error(f"Erreur: {e}")
-                else:
-                    st.warning("Veuillez remplir le nom et choisir une liste.")
+                else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
-        # 2. IMPORT FICHIER (Toutes listes)
+        # 2. IMPORT FICHIER
         with tabs[1]:
             st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
-            
-            # Ici, TOUTES les listes sont dispos
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
-            
             upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
             
             if upl_file and st.button("Importer les données 📥"):
@@ -299,13 +285,8 @@ if st.session_state["token"]:
                     df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
                     st.write(f"Aperçu ({len(df)} entrées) :")
                     st.dataframe(df.head(3))
-                    
-                    # Simulation de l'import (Boucle vers Backend)
-                    progress = st.progress(0)
-                    count_ok = 0
-                    
+                    progress = st.progress(0); count_ok = 0
                     for i, row in df.iterrows():
-                        # On essaie de trouver la colonne Nom
                         name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
                         if name_val != "Inconnu":
                             full_details = f"[{target_list_import}] IMPORT FICHIER"
@@ -313,38 +294,31 @@ if st.session_state["token"]:
                             requests.post(f"{API_URL}/people/", json=payload, headers=headers)
                             count_ok += 1
                         progress.progress((i+1)/len(df))
-                    
                     st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
-                    log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name} ({count_ok} items)")
-                    
-                except Exception as e:
-                    st.error(f"Erreur de lecture : {e}")
+                    log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
+                except Exception as e: st.error(f"Erreur de lecture : {e}")
 
         # 3. CRÉER LISTE
         with tabs[2]:
             st.write("Définir une nouvelle catégorie de liste.")
             new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
-            
             if st.button("Créer la Liste"):
                 if new_list_name:
-                    if new_list_name in get_all_lists():
-                        st.warning("Cette liste existe déjà.")
+                    if new_list_name in get_all_lists(): st.warning("Cette liste existe déjà.")
                     else:
                         if add_custom_list(new_list_name):
                             st.success(f"Liste '{new_list_name}' créée !")
                             log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
-                            st.rerun() # Pour mettre à jour les selectbox
-                        else:
-                            st.error("Erreur base de données locale.")
+                            st.rerun()
+                        else: st.error("Erreur base de données locale.")
 
         # 4. LOGS
         with tabs[3]:
             st.write("Historique des actions administratives.")
             df_logs = get_logs()
             st.dataframe(df_logs, use_container_width=True)
-            
-            if st.button("Rafraîchir les logs"):
-                st.rerun()
+            if st.button("Rafraîchir les logs"): st.rerun()
 
 else:
-    st.info("Veuillez vous connecter.")
+    # Page vide si non connecté (le formulaire est dans la sidebar)
+    st.info("👈 Veuillez vous connecter via le menu à gauche.")
