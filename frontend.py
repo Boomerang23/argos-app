@@ -199,7 +199,7 @@ if st.session_state["token"]:
             with col1: name = st.text_input("Nom Complet")
             with col2: nid = st.text_input("ID / Matricule")
             
-           if st.button("Lancer Scan", type="primary"):
+            if st.button("Lancer Scan", type="primary"):
                 if name:
                     try:
                         r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
@@ -221,25 +221,9 @@ if st.session_state["token"]:
                             pdf = create_kyc_pdf(name, nid, status, details)
                             st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
                         else:
-                            # 🚨 C'EST ICI QU'ON AFFICHE L'ERREUR CACHÉE :
-                            st.error(f"❌ Le Backend a planté (Code {r.status_code}). Détails : {r.text}")
+                            st.error(f"❌ Le Backend a renvoyé une erreur {r.status_code}. Détails: {r.text}")
                     except Exception as e: 
                         st.error(f"Erreur de connexion au serveur : {e}")
-                            
-                            # ✅ MODIFICATION : Le nouveau message dynamique
-                            if status == "ALERTE": 
-                                # Affiche directement le message généré par le Backend
-                                st.error(f"🚨 {details}") 
-                            else: 
-                                st.success(f"✅ RAS - Client Conforme")
-                                details = "RAS"
-                            
-                            save_scan(name, status, details)
-                            log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
-                            
-                            pdf = create_kyc_pdf(name, nid, status, details)
-                            st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
-                    except Exception as e: st.error(f"Erreur: {e}")
 
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
@@ -349,5 +333,3 @@ if st.session_state["token"]:
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
-
