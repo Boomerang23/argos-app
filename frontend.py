@@ -219,7 +219,7 @@ if st.session_state["token"]:
                             st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
                     except Exception as e: st.error(f"Erreur: {e}")
 
-      with t2:
+        with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             if upl and st.button("Scanner Liste"):
@@ -331,5 +331,6 @@ if st.session_state["token"]:
 else:
     # Page vide si non connecté (le formulaire est dans la sidebar)
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
 
 
