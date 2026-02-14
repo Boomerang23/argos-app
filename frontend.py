@@ -211,8 +211,8 @@ if st.session_state["token"]:
                             
                             # ✅ MODIFICATION : Le nouveau message dynamique
                             if status == "ALERTE": 
-                                st.error(f"🚨 Correspondance parfaite avec un profil sanctionné !")
-                                st.warning(f"📋 Motif / Info : {details}")
+                                # Affiche directement le message généré par le Backend
+                                st.error(f"🚨 {details}") 
                             else: 
                                 st.success(f"✅ RAS - Client Conforme")
                                 details = "RAS"
@@ -332,3 +332,4 @@ if st.session_state["token"]:
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
