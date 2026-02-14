@@ -16,5 +16,6 @@ plotly
 reportlab
 bcrypt==4.0.1
 openpyxl
+psycopg2-binary
 
 
