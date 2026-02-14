@@ -219,7 +219,7 @@ if st.session_state["token"]:
                             st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
                     except Exception as e: st.error(f"Erreur: {e}")
 
-        with t2:
+       with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             if upl and st.button("Scanner Liste"):
@@ -228,18 +228,27 @@ if st.session_state["token"]:
                 bar = st.progress(0)
                 for i, row in df.iterrows():
                     n = row.get('Nom', row.get('Name', 'Inconnu'))
+                    # ✅ CORRECTION : On récupère l'ID s'il y en a un dans le fichier, sinon on met "N/A"
+                    client_id = row.get('ID', row.get('Matricule', 'N/A'))
+                    
                     try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": "BULK", "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
+                        # On envoie l'ID au lieu de "BULK"
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
                         rk = r.json().get("risk_score", "Low")
                         stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
-                        res.append({"Nom": n, "Statut": stt, "Détail": r.json().get("details", "")})
+                        
+                        # ✅ CORRECTION : On ajoute bien la colonne "ID" dans le tableau final
+                        res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
                         save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
-                    except: res.append({"Nom": n, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                    except: 
+                        res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                        
                     bar.progress((i+1)/len(df))
                 
                 fin = pd.DataFrame(res)
                 st.dataframe(fin)
                 log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
+                # Maintenant le PDF trouvera bien la colonne "ID" !
                 st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
 
     # === GESTION DES LISTES ===
@@ -322,3 +331,4 @@ if st.session_state["token"]:
 else:
     # Page vide si non connecté (le formulaire est dans la sidebar)
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
