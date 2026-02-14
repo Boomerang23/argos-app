@@ -1,4 +1,5 @@
 import streamlit as st
+import textwrap
 import requests
 import pandas as pd
 import io
@@ -101,10 +102,20 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
     c.drawString(50, height - 210, f"Client : {client_name}"); c.drawString(50, height - 230, f"ID : {client_id}")
+    
     if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
     else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
+    
     c.setFillColor(color); c.setFont("Helvetica-Bold", 16); c.drawString(50, height - 280, f"STATUT : {text_status}")
-    c.setFillColor(colors.black); c.setFont("Helvetica", 12); c.drawString(50, height - 310, f"Détail : {risk_details}")
+    c.setFillColor(colors.black); c.setFont("Helvetica", 12)
+    
+    # ✅ CORRECTION : Retour à la ligne automatique pour les longs textes
+    lines = textwrap.wrap(f"Détail : {risk_details}", width=80) # Coupe après 80 caractères
+    y_pos = height - 310
+    for line in lines:
+        c.drawString(50, y_pos, line)
+        y_pos -= 20 # Descend de 20 pixels pour la ligne suivante
+        
     c.save(); buffer.seek(0)
     return buffer
 
@@ -363,4 +374,5 @@ if st.session_state["token"]:
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
 
