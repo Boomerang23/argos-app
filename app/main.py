@@ -56,40 +56,46 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 @app.post("/clients/")
 def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(auth.get_current_user)):
     
-    # 1. On vérifie si le client existe DÉJÀ dans la base (avec sa pièce d'identité)
+    # 1. Enregistrement ou mise à jour du client scanné
     db_client = db.query(models.Client).filter(models.Client.national_id == client.national_id).first()
-    
     if db_client:
-        # S'il existe, on met à jour son nom (au cas où il y a eu un changement de nom martial, etc.)
         db_client.full_name = client.full_name
     else:
-        # S'il n'existe pas, on l'ajoute
         db_client = models.Client(**client.dict())
         db.add(db_client)
         
-    # On sauvegarde (plus d'erreur de doublon car on a géré le cas au-dessus)
     db.commit()
     db.refresh(db_client)
 
-    # 2. On lance le Screening (Le Garde du Corps)
+    # 2. Le Screening
     from .services import ScreeningService
     screening_service = ScreeningService()
     matches = screening_service.check_name(db, client.full_name)
         
-    # 3. On renvoie le résultat formaté pour le Frontend
+    # 3. La Réponse Personnalisée
     if matches:
         criminel_trouve = matches[0]['matched_name']
-        score = matches[0]['score']
-        # Au lieu de crasher (403), on renvoie un statut ELEVE que Streamlit comprendra
+        
+        # 🔍 NOUVEAUTÉ : On cherche la liste d'origine
+        import re
+        liste_origine = "Inconnue"
+        profil = db.query(models.Sanction).filter(models.Sanction.name == criminel_trouve).first()
+        
+        if profil and profil.details:
+            # On extrait le nom de la liste situé entre les crochets (ex: "[Listes Internationales]")
+            match = re.search(r'\[(.*?)\]', profil.details)
+            if match:
+                liste_origine = match.group(1)
+        
         return {
             "id": db_client.id,
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "ELEVE",
-            "details": f"Sanction/PEP: {criminel_trouve}"
+            # On envoie ta phrase exacte au Frontend !
+            "details": f"Correspondance parfaite avec '{criminel_trouve}' de la liste '{liste_origine}'"
         }
     else:
-        # Le client est propre
         return {
             "id": db_client.id,
             "full_name": db_client.full_name,
@@ -142,5 +148,6 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
 
 
