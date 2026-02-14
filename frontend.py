@@ -251,6 +251,7 @@ if st.session_state["token"]:
                 # Maintenant le PDF trouvera bien la colonne "ID" !
                 st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
 
+    
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
@@ -275,11 +276,12 @@ if st.session_state["token"]:
                     full_details = f"[{target_list}] {details}"
                     payload = {"name": bad_name, "risk_level": "High", "details": full_details}
                     try:
-                        r = requests.post(f"{API_URL}/people/", json=payload, headers=headers)
+                        # ✅ CORRECTION 1 : /sanctions/ au lieu de /people/
+                        r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
                         if r.status_code == 200:
                             st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
                             log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
-                        else: st.error("Erreur serveur.")
+                        else: st.error("Erreur serveur ou format de donnée incorrect.")
                     except Exception as e: st.error(f"Erreur: {e}")
                 else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
@@ -300,14 +302,21 @@ if st.session_state["token"]:
                         if name_val != "Inconnu":
                             full_details = f"[{target_list_import}] IMPORT FICHIER"
                             payload = {"name": str(name_val), "risk_level": "High", "details": full_details}
-                            requests.post(f"{API_URL}/people/", json=payload, headers=headers)
-                            count_ok += 1
+                            
+                            # ✅ CORRECTION 2 : /sanctions/ au lieu de /people/
+                            r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
+                            if r.status_code == 200: # On s'assure que l'ajout a vraiment marché
+                                count_ok += 1
                         progress.progress((i+1)/len(df))
-                    st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
-                    log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
+                    
+                    if count_ok > 0:
+                        st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
+                        log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
+                    else:
+                        st.error("❌ L'import a échoué. Vérifie que le Backend fonctionne.")
                 except Exception as e: st.error(f"Erreur de lecture : {e}")
 
-        # 3. CRÉER LISTE
+        # 3. CRÉER LISTE (inchangé)
         with tabs[2]:
             st.write("Définir une nouvelle catégorie de liste.")
             new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
@@ -321,16 +330,16 @@ if st.session_state["token"]:
                             st.rerun()
                         else: st.error("Erreur base de données locale.")
 
-        # 4. LOGS
+        # 4. LOGS (inchangé)
         with tabs[3]:
             st.write("Historique des actions administratives.")
             df_logs = get_logs()
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
-
 else:
     # Page vide si non connecté (le formulaire est dans la sidebar)
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
 
 
 
