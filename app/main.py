@@ -76,13 +76,15 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
     if matches:
         criminel_trouve = matches[0]['matched_name']
         
-        # 🔍 NOUVEAUTÉ : On cherche la liste d'origine
+        # 🔍 SÉCURITÉ ANTI-CRASH : On cherche la liste d'origine proprement
         import re
-        liste_origine = "Inconnue"
+        liste_origine = "Liste de Surveillance (Locale/Internationale)" # Valeur par défaut
+        
+        # On essaie de récupérer le profil
         profil = db.query(models.Sanction).filter(models.Sanction.name == criminel_trouve).first()
         
-        if profil and profil.details:
-            # On extrait le nom de la liste situé entre les crochets (ex: "[Listes Internationales]")
+        # On vérifie si le profil existe ET s'il possède bien l'attribut 'details' avant de le lire
+        if profil and hasattr(profil, 'details') and profil.details:
             match = re.search(r'\[(.*?)\]', profil.details)
             if match:
                 liste_origine = match.group(1)
@@ -92,7 +94,6 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "ELEVE",
-            # On envoie ta phrase exacte au Frontend !
             "details": f"Correspondance parfaite avec '{criminel_trouve}' de la liste '{liste_origine}'"
         }
     else:
@@ -103,7 +104,6 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "risk_score": "FAIBLE",
             "details": "RAS"
         }
-
 @app.post("/sanctions/", response_model=schemas.SanctionOut)
 def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(auth.get_current_user)):
     db_sanction = models.Sanction(**sanction.dict())
@@ -148,6 +148,7 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
 
 
 
