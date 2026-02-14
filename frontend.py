@@ -4,6 +4,7 @@ import pandas as pd
 import io
 import sqlite3
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -209,22 +210,51 @@ if st.session_state["token"]:
                             details = d.get("details", "Non spécifié")
                             status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
                             
-                            if status == "ALERTE": 
-                                st.error(f"🚨 {details}") 
-                            else: 
-                                st.success(f"✅ RAS - Client Conforme")
-                                details = "RAS"
+                            # Création de deux colonnes pour le résultat
+                            res_col1, res_col2 = st.columns([1, 1])
                             
+                            with res_col1:
+                                st.write("### 📝 Rapport d'Analyse")
+                                if status == "ALERTE": 
+                                    st.error(f"🚨 {details}") 
+                                else: 
+                                    st.success(f"✅ RAS - Client Conforme")
+                                    details = "RAS"
+                                
+                                # Le bouton PDF en dessous du texte
+                                pdf = create_kyc_pdf(name, nid, status, details)
+                                st.download_button("Télécharger Rapport PDF", pdf, "rapport_kyc.pdf", "application/pdf")
+                            
+                            with res_col2:
+                                # Le compteur de vitesse (Jauge)
+                                score_val = 95 if status == "ALERTE" else 10
+                                bar_color = "red" if status == "ALERTE" else "green"
+                                
+                                fig = go.Figure(go.Indicator(
+                                    mode = "gauge+number",
+                                    value = score_val,
+                                    title = {'text': "Niveau de Risque", 'font': {'size': 20}},
+                                    gauge = {
+                                        'axis': {'range': [0, 100]},
+                                        'bar': {'color': bar_color},
+                                        'steps': [
+                                            {'range': [0, 40], 'color': "#e6ffe6"}, # Vert clair
+                                            {'range': [40, 75], 'color': "#fff0b3"}, # Jaune/Orange
+                                            {'range': [75, 100], 'color': "#ffe6e6"} # Rouge clair
+                                        ]
+                                    }
+                                ))
+                                fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
+                                st.plotly_chart(fig, use_container_width=True)
+
+                            # Sauvegarde dans la base
                             save_scan(name, status, details)
                             log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
                             
-                            pdf = create_kyc_pdf(name, nid, status, details)
-                            st.download_button("Télécharger Rapport", pdf, "rapport.pdf", "application/pdf")
                         else:
                             st.error(f"❌ Le Backend a renvoyé une erreur {r.status_code}. Détails: {r.text}")
                     except Exception as e: 
                         st.error(f"Erreur de connexion au serveur : {e}")
-
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
@@ -333,3 +363,4 @@ if st.session_state["token"]:
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
