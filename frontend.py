@@ -132,7 +132,7 @@ st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", 
 st.markdown("<h4 style='text-align: center;'>Système de Gestion des référentiels KYC</h4>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- LOGIN (CORRIGÉ AVEC FORMULAIRE) ---
+# --- LOGIN ---
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 
@@ -140,7 +140,6 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/9370/9370273.png", width=50)
     st.header("🔐 Accès Sécurisé")
     
-    # Si NON connecté : on affiche le formulaire
     if st.session_state["token"] is None:
         with st.form("login_form"):
             email = st.text_input("Email", "admin@sgi.ci")
@@ -160,7 +159,6 @@ with st.sidebar:
             except Exception as e:
                 st.error("⛔ Serveur inaccessible (Réveil en cours...)")
     
-    # Si CONNECTÉ : on affiche le bouton logout
     else:
         st.success(f"👤 {st.session_state['user_email']}")
         if st.button("Se déconnecter"): 
@@ -208,9 +206,16 @@ if st.session_state["token"]:
                         if r.status_code == 200:
                             d = r.json()
                             risk = d.get("risk_score")
+                            details = d.get("details", "Non spécifié")
                             status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
-                            if status == "ALERTE": st.error(f"🚨 RISQUE ÉLEVÉ DÉTECTÉ: {name}"); details = d.get('details', 'N/A')
-                            else: st.success(f"✅ RAS - Client Conforme"); details = "RAS"
+                            
+                            # ✅ MODIFICATION : Le nouveau message dynamique
+                            if status == "ALERTE": 
+                                st.error(f"🚨 Correspondance parfaite avec un profil sanctionné !")
+                                st.warning(f"📋 Motif / Info : {details}")
+                            else: 
+                                st.success(f"✅ RAS - Client Conforme")
+                                details = "RAS"
                             
                             save_scan(name, status, details)
                             log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
@@ -228,16 +233,13 @@ if st.session_state["token"]:
                 bar = st.progress(0)
                 for i, row in df.iterrows():
                     n = row.get('Nom', row.get('Name', 'Inconnu'))
-                    # ✅ CORRECTION : On récupère l'ID s'il y en a un dans le fichier, sinon on met "N/A"
                     client_id = row.get('ID', row.get('Matricule', 'N/A'))
                     
                     try:
-                        # On envoie l'ID au lieu de "BULK"
                         r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
                         rk = r.json().get("risk_score", "Low")
                         stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
                         
-                        # ✅ CORRECTION : On ajoute bien la colonne "ID" dans le tableau final
                         res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
                         save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
                     except: 
@@ -248,17 +250,14 @@ if st.session_state["token"]:
                 fin = pd.DataFrame(res)
                 st.dataframe(fin)
                 log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
-                # Maintenant le PDF trouvera bien la colonne "ID" !
                 st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
 
-    
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
         
         tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier (Update)", "➕ Créer une Liste", "📜 Logs (Audit)"])
 
-        # 1. ENTRÉE MANUELLE
         with tabs[0]:
             st.info("Ajouter individuellement une personne à une liste locale.")
             all_lists = get_all_lists()
@@ -276,7 +275,6 @@ if st.session_state["token"]:
                     full_details = f"[{target_list}] {details}"
                     payload = {"name": bad_name, "risk_level": "High", "details": full_details}
                     try:
-                        # ✅ CORRECTION 1 : /sanctions/ au lieu de /people/
                         r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
                         if r.status_code == 200:
                             st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
@@ -285,7 +283,6 @@ if st.session_state["token"]:
                     except Exception as e: st.error(f"Erreur: {e}")
                 else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
-        # 2. IMPORT FICHIER
         with tabs[1]:
             st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
@@ -303,9 +300,8 @@ if st.session_state["token"]:
                             full_details = f"[{target_list_import}] IMPORT FICHIER"
                             payload = {"name": str(name_val), "risk_level": "High", "details": full_details}
                             
-                            # ✅ CORRECTION 2 : /sanctions/ au lieu de /people/
                             r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                            if r.status_code == 200: # On s'assure que l'ajout a vraiment marché
+                            if r.status_code == 200: 
                                 count_ok += 1
                         progress.progress((i+1)/len(df))
                     
@@ -316,7 +312,6 @@ if st.session_state["token"]:
                         st.error("❌ L'import a échoué. Vérifie que le Backend fonctionne.")
                 except Exception as e: st.error(f"Erreur de lecture : {e}")
 
-        # 3. CRÉER LISTE (inchangé)
         with tabs[2]:
             st.write("Définir une nouvelle catégorie de liste.")
             new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
@@ -330,16 +325,10 @@ if st.session_state["token"]:
                             st.rerun()
                         else: st.error("Erreur base de données locale.")
 
-        # 4. LOGS (inchangé)
         with tabs[3]:
             st.write("Historique des actions administratives.")
             df_logs = get_logs()
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
-    # Page vide si non connecté (le formulaire est dans la sidebar)
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
-
-
-
