@@ -105,3 +105,23 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class AlertOut(BaseModel):
+    id: int
+    client_name: str
+    matched_name: str
+    similarity_score: float
+    status: str
+    decision: Optional[str]
+    comments: Optional[str]
+    assigned_to: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class AlertUpdate(BaseModel):
+    status: Optional[str]
+    decision: Optional[str]
+    comments: Optional[str]
+    assigned_to: Optional[str]
