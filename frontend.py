@@ -153,7 +153,7 @@ if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 if "role" not in st.session_state: st.session_state["role"] = "" # NOUVEAU : Sauvegarde du Rôle
 
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/9370/9370273.png", width=50)
+    st.title("🛡️")
     st.header("🔐 Accès Sécurisé")
     
     if st.session_state["token"] is None:
@@ -431,3 +431,4 @@ if st.session_state["token"]:
                             st.error(f"Erreur : Cet email est peut-être déjà utilisé.")
                     else:
                         st.warning("Veuillez remplir tous les champs.")
+
