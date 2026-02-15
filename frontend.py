@@ -118,19 +118,27 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS")
-    c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
-    c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
-    c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
+    c.setFont("Helvetica-Bold", 24)
+    c.drawString(50, height - 50, "ARGOS")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
+    c.setLineWidth(2)
+    c.line(50, height - 80, width - 50, height - 80)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-    c.drawString(50, height - 210, f"Client : {client_name}"); c.drawString(50, height - 230, f"ID : {client_id}")
+    c.drawString(50, height - 210, f"Client : {client_name}")
+    c.drawString(50, height - 230, f"ID : {client_id}")
     
     if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
     else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
     
-    c.setFillColor(color); c.setFont("Helvetica-Bold", 16); c.drawString(50, height - 280, f"STATUT : {text_status}")
-    c.setFillColor(colors.black); c.setFont("Helvetica", 12)
+    c.setFillColor(color)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, height - 280, f"STATUT : {text_status}")
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica", 12)
     
     lines = textwrap.wrap(f"Détail : {risk_details}", width=80) 
     y_pos = height - 310
@@ -138,7 +146,8 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
         c.drawString(50, y_pos, line)
         y_pos -= 20 
         
-    c.save(); buffer.seek(0)
+    c.save()
+    buffer.seek(0)
     return buffer
 
 def create_global_report(dataframe):
@@ -151,14 +160,17 @@ def create_global_report(dataframe):
     rejected = len(dataframe[dataframe['Statut'].str.contains("REJETÉ") | dataframe['Statut'].str.contains("ALERTE")])
     total = len(dataframe); compliant = total - rejected
     stats_text = f"Date : {datetime.now().strftime('%d/%m/%Y')}<br/>Total : {total} | Conformes : {compliant} | <b>Alertes : {rejected}</b>"
-    elements.append(Paragraph(stats_text, styles['Normal'])); elements.append(Spacer(1, 20))
+    elements.append(Paragraph(stats_text, styles['Normal']))
+    elements.append(Spacer(1, 20))
     data = [["Nom du Client", "ID National", "Statut", "Détail"]]
     for index, row in dataframe.iterrows(): data.append([str(row['Nom']), str(row['ID']), str(row['Statut']), str(row['Détail'])])
     table = Table(data)
     table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                                ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
-    elements.append(table); doc.build(elements); buffer.seek(0)
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
     return buffer
 
 # --- NOUVEAU : PDF D'INVESTIGATION D'ALERTE ---
@@ -224,7 +236,6 @@ def create_investigation_pdf(row_data):
     c.save()
     buffer.seek(0)
     return buffer
-
 
 # --- TITRE ---
 st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", unsafe_allow_html=True)
@@ -405,7 +416,6 @@ if st.session_state["token"]:
                 st.write(f"**Date d'ouverture :** {row['created_at']}")
                 st.info(f"**Statut actuel :** {row['status']}")
                 
-                # --- NOUVEAU : BOUTON DE TÉLÉCHARGEMENT PDF ---
                 st.markdown("---")
                 investigation_pdf = create_investigation_pdf(row.to_dict())
                 st.download_button(
@@ -428,25 +438,23 @@ if st.session_state["token"]:
                     
                     new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
 
-                   if st.form_submit_button("Enregistrer la décision"):
+                    if st.form_submit_button("Enregistrer la décision"):
                         payload = {
                             "status": new_status,
                             "decision": new_decision,
                             "comments": new_comm
                         }
-                        # NOUVEAU : On récupère le vrai message d'erreur
                         success, message = update_alert_api(sel_id, payload)
                         if success:
                             st.success("✅ Décision enregistrée avec succès !")
                             log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision}")
                             st.rerun()
                         else:
-                            st.error(f"❌ {message}") # Affiche la cause exacte !
+                            st.error(f"❌ {message}")
 
             st.markdown("---")
             st.write("### 📋 Historique Complet des Alertes")
             st.dataframe(df_a, use_container_width=True)
-
 
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
@@ -466,8 +474,10 @@ if st.session_state["token"]:
                 if bad_name:
                     r = requests.post(f"{API_URL}/sanctions/", json={"name": bad_name, "list_source": target_list})
                     if r.status_code == 200: 
-                        st.success("Ajouté"); log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, target_list)
-                    else: st.error("Erreur")
+                        st.success("Ajouté")
+                        log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, target_list)
+                    else: 
+                        st.error("Erreur")
 
         with tabs[1]:
             target_list_import = st.selectbox("Sélectionner la Liste", get_all_lists())
@@ -477,7 +487,8 @@ if st.session_state["token"]:
                 for i, r_imp in df_imp.iterrows():
                     name_v = r_imp.get('Nom') or r_imp.get('Name') or "Inconnu"
                     requests.post(f"{API_URL}/sanctions/", json={"name": str(name_v), "list_source": target_list_import})
-                st.success("Import terminé"); log_action(st.session_state["user_email"], "IMPORT", target_list_import, upl_file.name)
+                st.success("Import terminé")
+                log_action(st.session_state["user_email"], "IMPORT", target_list_import, upl_file.name)
 
         with tabs[2]:
             st.dataframe(get_logs(), use_container_width=True)
@@ -496,9 +507,11 @@ if st.session_state["token"]:
                 n_rl = st.selectbox("Rôle", ["AGENT", "ADMIN"])
                 if st.form_submit_button("Créer"):
                     ok, msg = create_user(n_em, n_ps, n_nm, n_rl)
-                    if ok: st.success("Créé"); st.rerun()
-                    else: st.error("Erreur")
+                    if ok: 
+                        st.success("Créé")
+                        st.rerun()
+                    else: 
+                        st.error("Erreur")
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
