@@ -70,11 +70,11 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
     screening_service = ScreeningService()
     matches = screening_service.check_name(db, client.full_name)
         
-    # 3. La Réponse Personnalisée (AVEC LE SCORE DE SIMILITUDE !)
+   # 3. La Réponse Personnalisée (AVEC LE SCORE DE SIMILITUDE !)
     if matches:
         best_match = matches[0]
         criminel_trouve = best_match['matched_name']
-        score = best_match.get('score', 100) # Récupère le score de thefuzz
+        score = best_match.get('score', 100) # Récupère le score
         liste_origine = best_match.get('list_source', 'Liste de Surveillance')
         
         return {
@@ -82,7 +82,8 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "ELEVE",
-            "details": f"🚨 ALERTE (Similitude : {score}%) - Correspondance suspecte avec '{criminel_trouve}' (Source : {liste_origine})"
+            "similarity_score": score,  # <-- NOUVEAU : On envoie le chiffre exact !
+            "details": f"🚨 ALERTE (Similitude : {score}%) - Correspondance avec '{criminel_trouve}' (Source : {liste_origine})"
         }
     else:
         return {
@@ -90,6 +91,7 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "FAIBLE",
+            "similarity_score": 0, # <-- NOUVEAU : Score à 0 si tout va bien
             "details": "✅ RAS - Aucune correspondance significative"
         }
 
@@ -207,3 +209,4 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
