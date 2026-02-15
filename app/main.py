@@ -70,19 +70,31 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
     screening_service = ScreeningService()
     matches = screening_service.check_name(db, client.full_name)
         
-   # 3. La Réponse Personnalisée (AVEC LE SCORE DE SIMILITUDE !)
+   # 3. La Réponse Personnalisée & Création d'Alerte
     if matches:
         best_match = matches[0]
         criminel_trouve = best_match['matched_name']
-        score = best_match.get('score', 100) # Récupère le score
+        score = best_match.get('score', 100)
         liste_origine = best_match.get('list_source', 'Liste de Surveillance')
         
+        # NOUVEAU : Création automatique d'un ticket d'alerte dans la base de données
+        if score >= 80:
+            new_alert = models.Alert(
+                client_name=client.full_name,
+                matched_name=criminel_trouve,
+                similarity_score=score,
+                status="OUVERT",
+                assigned_to="Non assigné"
+            )
+            db.add(new_alert)
+            db.commit()
+
         return {
             "id": db_client.id,
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "ELEVE",
-            "similarity_score": score,  # <-- NOUVEAU : On envoie le chiffre exact !
+            "similarity_score": score,
             "details": f"🚨 ALERTE (Similitude : {score}%) - Correspondance avec '{criminel_trouve}' (Source : {liste_origine})"
         }
     else:
@@ -209,4 +221,24 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
+# --- ROUTES GESTION DES ALERTES ---
+
+@app.get("/alerts/", response_model=list[schemas.AlertOut])
+def get_alerts(db: Session = Depends(database.get_db)):
+    return db.query(models.Alert).order_by(models.Alert.created_at.desc()).all()
+
+@app.patch("/alerts/{alert_id}")
+def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = Depends(database.get_db)):
+    db_alert = db.query(models.Alert).filter(models.Alert.id == alert_id).first()
+    if not db_alert:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    
+    # Mise à jour dynamique des champs envoyés
+    for var, value in update_data.dict(exclude_unset=True).items():
+        setattr(db_alert, var, value)
+    
+    db.commit()
+    return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
 
