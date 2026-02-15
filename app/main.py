@@ -70,24 +70,19 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
     screening_service = ScreeningService()
     matches = screening_service.check_name(db, client.full_name)
         
-   # 3. La Réponse Personnalisée
+    # 3. La Réponse Personnalisée (AVEC LE SCORE DE SIMILITUDE !)
     if matches:
-        criminel_trouve = matches[0]['matched_name']
-        liste_origine = "Liste de Surveillance" # Valeur de secours
-        
-        # On essaie de récupérer le profil complet
-        profil = db.query(models.Sanction).filter(models.Sanction.name == criminel_trouve).first()
-        
-        # ON UTILISE list_source !
-        if profil and hasattr(profil, 'list_source') and profil.list_source:
-            liste_origine = profil.list_source
+        best_match = matches[0]
+        criminel_trouve = best_match['matched_name']
+        score = best_match.get('score', 100) # Récupère le score de thefuzz
+        liste_origine = best_match.get('list_source', 'Liste de Surveillance')
         
         return {
             "id": db_client.id,
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "ELEVE",
-            "details": f"Correspondance parfaite avec '{criminel_trouve}' de la liste '{liste_origine}'"
+            "details": f"🚨 ALERTE (Similitude : {score}%) - Correspondance suspecte avec '{criminel_trouve}' (Source : {liste_origine})"
         }
     else:
         return {
@@ -95,7 +90,7 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "full_name": db_client.full_name,
             "national_id": db_client.national_id,
             "risk_score": "FAIBLE",
-            "details": "RAS"
+            "details": "✅ RAS - Aucune correspondance significative"
         }
 
 @app.post("/sanctions/", response_model=schemas.SanctionOut)
@@ -206,7 +201,7 @@ def create_admin_user():
     user = db.query(models.User).filter(models.User.email == "admin@sgi.ci").first()
     if not user:
         print("⚠️ Création de l'utilisateur ADMIN...")
-        hashed_password = get_password_hash("admin") # Correction ici
+        hashed_password = get_password_hash("admin") 
         db_user = models.User(email="admin@sgi.ci", hashed_password=hashed_password, full_name="Super Administrateur", role="ADMIN")
         db.add(db_user)
         db.commit()
