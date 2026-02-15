@@ -112,7 +112,6 @@ def update_alert_api(alert_id, data):
     except Exception as e: 
         return False, str(e)
 
-
 # --- FONCTIONS PDF ---
 def create_kyc_pdf(client_name, client_id, status, risk_details):
     buffer = io.BytesIO()
@@ -205,7 +204,7 @@ def create_investigation_pdf(row_data):
     
     statut = row_data.get('status', 'OUVERT')
     decision = row_data.get('decision', 'EN_ATTENTE')
-    if not decision: decision = "EN_ATTENTE"
+    if pd.isna(decision) or not decision: decision = "EN_ATTENTE"
     
     if decision == "CONFIRME": color = colors.red
     elif decision == "FAUX_POSITIF": color = colors.green
@@ -218,10 +217,10 @@ def create_investigation_pdf(row_data):
     
     c.drawString(60, height - 370, "Commentaires de l'analyste / Justification :")
     
-    comments = str(row_data.get('comments', 'Aucun commentaire.'))
-    if comments in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
+    comments = row_data.get('comments', 'Aucun commentaire.')
+    if pd.isna(comments) or comments in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
     
-    lines = textwrap.wrap(comments, width=80) 
+    lines = textwrap.wrap(str(comments), width=80) 
     y_pos = height - 390
     for line in lines:
         c.drawString(70, y_pos, line)
@@ -390,195 +389,4 @@ if st.session_state["token"]:
 
     # === CENTRE D'ALERTES ===
     elif menu == "🚦 Alertes":
-        st.subheader("🚦 Centre de Traitement des Alertes")
-        df_a = get_alerts()
-        
-        if df_a.empty:
-            st.info("RAS : Aucune alerte en attente de traitement.")
-        else:
-            # --- NOUVEAU SP-GA-07 : Moteur de SLA (Délais) ---
-            now = datetime.now()
-            
-            def calculate_sla(row):
-                if row['status'] == 'FERME':
-                    return "✅ Traité"
-                
-                try:
-                    # Conversion de la date pour le calcul
-                    created_dt = pd.to_datetime(row['created_at']).replace(tzinfo=None)
-                    delta_hours = (now - created_dt).total_seconds() / 3600
-                    
-                    if delta_hours > 48:
-                        return "🚨 HORS DÉLAI (>48h)"
-                    elif delta_hours > 24:
-                        return "⚠️ Attention (>24h)"
-                    else:
-                        return "🟢 Dans les temps"
-                except:
-                    return "Inconnu"
-
-            # Application de la règle SLA
-            df_a['SLA'] = df_a.apply(calculate_sla, axis=1)
-            
-            # Formatage de la date pour un affichage lisible
-            if 'created_at' in df_a.columns:
-                df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
-
-            st.write("### 🗂️ Filtres rapides")
-            filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
-            
-            df_filtered = df_a if filter_stat == "Toutes" else df_a[df_a['status'] == filter_stat]
-            
-            if df_filtered.empty:
-                st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
-            else:
-                df_filtered['Priorité'] = df_filtered['similarity_score'].apply(lambda x: '🔴 Haute' if x >= 90 else '🟠 Moyenne')
-                
-                alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['SLA']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
-                alert_ids = df_filtered['id'].tolist()
-                
-                sel_index = st.selectbox("🎯 Sélectionner le dossier à traiter", range(len(alert_options)), format_func=lambda x: alert_options[x])
-                sel_id = alert_ids[sel_index]
-                row = df_filtered.iloc[sel_index]
-
-                col_inf, col_form = st.columns(2)
-                
-                with col_inf:
-                    st.markdown(f"### 📁 Dossier #{sel_id}")
-                    # Affichage du SLA en rouge si hors délai
-                    if "HORS DÉLAI" in row['SLA']:
-                        st.error(f"**Délai de traitement (SLA) : {row['SLA']}**")
-                    elif "Attention" in row['SLA']:
-                        st.warning(f"**Délai de traitement (SLA) : {row['SLA']}**")
-                    else:
-                        st.success(f"**Délai de traitement (SLA) : {row['SLA']}**")
-
-                    st.write(f"**Priorité IA :** {row['Priorité']}")
-                    st.write(f"**Client scanné :** {row['client_name']}")
-                    st.write(f"**Cible détectée :** {row['matched_name']}")
-                    st.write(f"**Score de similitude :** {row['similarity_score']}%")
-                    st.write(f"**Date d'ouverture :** {row['created_at_str']}")
-                    st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
-                    st.info(f"**Statut actuel :** {row['status']}")
-                    
-                    st.markdown("---")
-                    investigation_pdf = create_investigation_pdf(row.to_dict())
-                    st.download_button(
-                        label="📄 Télécharger le Rapport d'Investigation",
-                        data=investigation_pdf,
-                        file_name=f"rapport_investigation_alerte_{sel_id}.pdf",
-                        mime="application/pdf",
-                        type="secondary"
-                    )
-
-                with col_form:
-                    st.markdown("### ✍️ Décision & Preuves")
-                    
-                    users_df = get_users()
-                    agent_list = ["Non assigné"]
-                    if not users_df.empty:
-                        agent_list += users_df['email'].tolist()
-                    
-                    current_assignee = row.get('assigned_to', 'Non assigné')
-                    if current_assignee not in agent_list: current_assignee = "Non assigné"
-
-                    with st.form("alert_update_form"):
-                        new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
-                        
-                        new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], 
-                                                 index=["OUVERT", "EN_COURS", "FERME"].index(row['status']))
-                        
-                        current_dec = row['decision'] if row['decision'] else "EN_ATTENTE"
-                        new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"],
-                                                   index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
-                        
-                        new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
-                        
-                        st.markdown("**📎 Pièces justificatives**")
-                        uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
-
-                        if st.form_submit_button("Enregistrer la décision"):
-                            final_comm = new_comm
-                            if uploaded_file:
-                                final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
-
-                            payload = {
-                                "status": new_status,
-                                "decision": new_decision,
-                                "comments": final_comm,
-                                "assigned_to": new_assignee
-                            }
-                            success, message = update_alert_api(sel_id, payload)
-                            if success:
-                                st.success("✅ Dossier mis à jour avec succès !")
-                                file_log = f"| Fichier: {uploaded_file.name}" if uploaded_file else ""
-                                log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision} {file_log}")
-                                st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
-
-            st.markdown("---")
-            st.write("### 📋 Historique Complet (Filtré)")
-            # On affiche les colonnes importantes pour éviter d'avoir un tableau illisible
-            columns_to_show = ['id', 'SLA', 'Priorité', 'client_name', 'status', 'assigned_to', 'created_at_str']
-            st.dataframe(df_filtered[columns_to_show], use_container_width=True)
-
-    # === GESTION DES LISTES ===
-    elif menu == "⚙️ Gestion des Listes":
-        st.subheader("⚙️ Administration des Listes")
-        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "📜 Logs"])
-
-        with tabs[0]:
-            manual_lists = [L for L in get_all_lists() if L != "Listes Internationales"]
-            c1, c2 = st.columns(2)
-            with c1:
-                target_list = st.selectbox("Liste cible", manual_lists)
-                bad_name = st.text_input("Nom de la personne")
-            with c2:
-                details_man = st.text_input("Motif")
-            
-            if st.button("Ajouter à la liste"):
-                if bad_name:
-                    r = requests.post(f"{API_URL}/sanctions/", json={"name": bad_name, "list_source": target_list})
-                    if r.status_code == 200: 
-                        st.success("Ajouté")
-                        log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, target_list)
-                    else: 
-                        st.error("Erreur")
-
-        with tabs[1]:
-            target_list_import = st.selectbox("Sélectionner la Liste", get_all_lists())
-            upl_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
-            if upl_file and st.button("Importer 📥"):
-                df_imp = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
-                for i, r_imp in df_imp.iterrows():
-                    name_v = r_imp.get('Nom') or r_imp.get('Name') or "Inconnu"
-                    requests.post(f"{API_URL}/sanctions/", json={"name": str(name_v), "list_source": target_list_import})
-                st.success("Import terminé")
-                log_action(st.session_state["user_email"], "IMPORT", target_list_import, upl_file.name)
-
-        with tabs[2]:
-            st.dataframe(get_logs(), use_container_width=True)
-
-    # === UTILISATEURS ===
-    elif menu == "👥 Utilisateurs":
-        st.subheader("👥 Gestion de l'Équipe")
-        tab_l, tab_a = st.tabs(["📋 Liste", "➕ Ajouter"])
-        with tab_l:
-            st.dataframe(get_users(), use_container_width=True)
-        with tab_a:
-            with st.form("new_user"):
-                n_em = st.text_input("Email")
-                n_nm = st.text_input("Nom")
-                n_ps = st.text_input("Pass", type="password")
-                n_rl = st.selectbox("Rôle", ["AGENT", "ADMIN"])
-                if st.form_submit_button("Créer"):
-                    ok, msg = create_user(n_em, n_ps, n_nm, n_rl)
-                    if ok: 
-                        st.success("Créé")
-                        st.rerun()
-                    else: 
-                        st.error("Erreur")
-
-else:
-    st.info("👈 Veuillez vous connecter via le menu à gauche.")
+        st
