@@ -5,17 +5,18 @@ from . import models
 class ScreeningService:
     def check_name(self, db: Session, name: str, threshold: int = 80):
         """
-        Vérifie un nom par rapport à la base de données PostgreSQL.
+        Vérifie un nom par rapport à la base de données PostgreSQL avec thefuzz.
         """
-        # 1. On récupère TOUS les noms de la table Sanctions
+        # 1. On récupère TOUS les profils de la table Sanctions
         sanctions_query = db.query(models.Sanction).all()
         
         # Si la liste est vide, on arrête tout de suite
         if not sanctions_query:
             return []
             
-        # On extrait juste les noms pour l'algorithme
-        db_names = [s.name for s in sanctions_query]
+        # NOUVEAU : On crée un dictionnaire pour se souvenir de la source de chaque nom
+        sanctions_dict = {s.name: getattr(s, 'list_source', 'Liste de Surveillance') for s in sanctions_query}
+        db_names = list(sanctions_dict.keys())
         
         # 2. On compare le nom d'entrée avec la liste de la DB
         matches = process.extract(name, db_names, scorer=fuzz.token_sort_ratio, limit=3)
@@ -25,7 +26,8 @@ class ScreeningService:
             if score >= threshold:
                 results.append({
                     "matched_name": match_name,
-                    "score": score,
+                    "score": round(score, 2),
+                    "list_source": sanctions_dict[match_name], # On récupère la vraie source !
                     "alert": True
                 })
         
