@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float
 from .database import Base
 import uuid
 from datetime import datetime
@@ -86,5 +86,16 @@ class User(Base):
     role = Column(String, default="AGENT") # Les rôles seront "ADMIN" ou "AGENT"
     is_active = Column(Boolean, default=True)
 
+class Alert(Base):
+    __tablename__ = "alerts"
+    id = Column(Integer, primary_key=True, index=True)
+    client_name = Column(String)
+    matched_name = Column(String)
+    similarity_score = Column(Float)
+    status = Column(String, default="OUVERT")  # OUVERT, EN_COURS, FERME
+    decision = Column(String, nullable=True) # FAUX_POSITIF ou CONFIRME
+    comments = Column(String, nullable=True)
+    assigned_to = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
