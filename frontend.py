@@ -76,7 +76,7 @@ def load_stats():
     except: pass
     return pd.DataFrame(columns=["date", "client_name", "status", "details"])
 
-# --- NOUVEAU : GESTION DES UTILISATEURS ---
+# --- GESTION DES UTILISATEURS ---
 def get_users():
     try:
         r = requests.get(f"{API_URL}/users/")
@@ -92,6 +92,21 @@ def create_user(email, password, full_name, role):
         return r.status_code == 200, r.text
     except Exception as e:
         return False, str(e)
+
+# --- NOUVEAU : GESTION DES ALERTES (TICKETS) ---
+def get_alerts():
+    try:
+        r = requests.get(f"{API_URL}/alerts/")
+        if r.status_code == 200:
+            return pd.DataFrame(r.json())
+    except: pass
+    return pd.DataFrame()
+
+def update_alert_api(alert_id, data):
+    try:
+        r = requests.patch(f"{API_URL}/alerts/{alert_id}", json=data)
+        return r.status_code == 200
+    except: return False
 
 
 # --- FONCTIONS PDF ---
@@ -150,7 +165,7 @@ st.markdown("<hr>", unsafe_allow_html=True)
 # --- LOGIN ---
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
-if "role" not in st.session_state: st.session_state["role"] = "" # NOUVEAU : Sauvegarde du Rôle
+if "role" not in st.session_state: st.session_state["role"] = "" 
 
 with st.sidebar:
     st.title("🛡️")
@@ -169,7 +184,7 @@ with st.sidebar:
                     data = res.json()
                     st.session_state["token"] = data.get("access_token")
                     st.session_state["user_email"] = email
-                    st.session_state["role"] = data.get("role", "AGENT") # On récupère le rôle de la DB !
+                    st.session_state["role"] = data.get("role", "AGENT") 
                     st.success("✅ Connexion réussie !")
                     st.rerun()
                 else: 
@@ -190,9 +205,9 @@ if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
     # NAVIGATION DYNAMIQUE SELON LE RÔLE
-    menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "⚙️ Gestion des Listes"]
+    menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
     if st.session_state["role"] == "ADMIN":
-        menu_options.append("👥 Utilisateurs") # Ajouté uniquement pour les Admins
+        menu_options.append("👥 Utilisateurs") 
         
     menu = st.sidebar.radio("Menu", menu_options)
 
@@ -225,12 +240,12 @@ if st.session_state["token"]:
             if st.button("Lancer Scan", type="primary"):
                 if name:
                     try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "national_id": nid})
                         if r.status_code == 200:
                             d = r.json()
                             risk = d.get("risk_score")
                             details = d.get("details", "Non spécifié")
-                            sim_score = d.get("similarity_score", 0) # <-- On récupère le chiffre de l'IA
+                            sim_score = d.get("similarity_score", 0) 
                             status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
                             
                             res_col1, res_col2 = st.columns([1, 1])
@@ -238,7 +253,7 @@ if st.session_state["token"]:
                             with res_col1:
                                 st.write("### 📝 Rapport d'Analyse")
                                 if status == "ALERTE": 
-                                    st.error(f"{details}") # J'ai enlevé l'émoji 🚨 en double
+                                    st.error(f"{details}") 
                                 else: 
                                     st.success(f"{details}")
                                 
@@ -246,7 +261,6 @@ if st.session_state["token"]:
                                 st.download_button("Télécharger Rapport PDF", pdf, "rapport_kyc.pdf", "application/pdf")
                             
                             with res_col2:
-                                # LA JAUGE DYNAMIQUE !
                                 score_val = sim_score if status == "ALERTE" else 10
                                 bar_color = "red" if status == "ALERTE" else "green"
                                 
@@ -267,14 +281,13 @@ if st.session_state["token"]:
                                 fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
                                 st.plotly_chart(fig, use_container_width=True)
 
-                            # Sauvegarde CLOUD
                             save_scan(name, status, details)
                             log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
                             
                         else:
-                            st.error(f"❌ Le Backend a renvoyé une erreur {r.status_code}. Détails: {r.text}")
+                            st.error(f"❌ Erreur Backend {r.status_code}")
                     except Exception as e: 
-                        st.error(f"Erreur de connexion au serveur : {e}")
+                        st.error(f"Erreur connexion : {e}")
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
@@ -285,152 +298,126 @@ if st.session_state["token"]:
                 for i, row in df.iterrows():
                     n = row.get('Nom', row.get('Name', 'Inconnu'))
                     client_id = row.get('ID', row.get('Matricule', 'N/A'))
-                    
                     try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "national_id": str(client_id)})
                         rk = r.json().get("risk_score", "Low")
                         stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
-                        
                         res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
-                        # Sauvegarde CLOUD
                         save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
                     except: 
                         res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
-                        
                     bar.progress((i+1)/len(df))
                 
                 fin = pd.DataFrame(res)
                 st.dataframe(fin)
-                log_action(st.session_state["user_email"], "SCAN_MASSE", upl.name, f"{len(df)} lignes")
-                st.download_button("Rapport PDF", create_global_report(fin), "rapport_global.pdf", "application/pdf")
+                st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
+
+    # === CENTRE D'ALERTES ===
+    elif menu == "🚦 Alertes":
+        st.subheader("🚦 Centre de Traitement des Alertes")
+        df_a = get_alerts()
+        
+        if df_a.empty:
+            st.info("RAS : Aucune alerte en attente de traitement.")
+        else:
+            # Formatage de la date pour l'affichage
+            if 'created_at' in df_a.columns:
+                df_a['created_at'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+
+            sel_id = st.selectbox("🎯 Sélectionner un Dossier d'Alerte (ID)", df_a['id'].tolist())
+            row = df_a[df_a['id'] == sel_id].iloc[0]
+
+            col_inf, col_form = st.columns(2)
+            
+            with col_inf:
+                st.markdown(f"### 📁 Dossier #{sel_id}")
+                st.write(f"**Client scanné :** {row['client_name']}")
+                st.write(f"**Cible détectée :** {row['matched_name']}")
+                st.write(f"**Score de similitude :** {row['similarity_score']}%")
+                st.write(f"**Date d'ouverture :** {row['created_at']}")
+                st.info(f"**Statut actuel :** {row['status']}")
+
+            with col_form:
+                st.markdown("### ✍️ Décision de Conformité")
+                with st.form("alert_update_form"):
+                    new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], 
+                                             index=["OUVERT", "EN_COURS", "FERME"].index(row['status']))
+                    
+                    # Logique pour indexer la décision actuelle ou mettre 0 par défaut
+                    current_dec = row['decision'] if row['decision'] else "EN_ATTENTE"
+                    new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"],
+                                               index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
+                    
+                    new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
+
+                    if st.form_submit_button("Enregistrer la décision"):
+                        payload = {
+                            "status": new_status,
+                            "decision": new_decision,
+                            "comments": new_comm
+                        }
+                        if update_alert_api(sel_id, payload):
+                            st.success("✅ Décision enregistrée avec succès !")
+                            log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision}")
+                            st.rerun()
+                        else:
+                            st.error("❌ Erreur lors de la mise à jour.")
+
+            st.markdown("---")
+            st.write("### 📋 Historique Complet des Alertes")
+            st.dataframe(df_a, use_container_width=True)
+
 
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
-        st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
-        
-        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
+        st.subheader("⚙️ Administration des Listes")
+        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "📜 Logs"])
 
         with tabs[0]:
-            st.info("Ajouter individuellement une personne à une liste locale.")
-            all_lists = get_all_lists()
-            manual_lists = [L for L in all_lists if L != "Listes Internationales"]
-            
+            manual_lists = [L for L in get_all_lists() if L != "Listes Internationales"]
             c1, c2 = st.columns(2)
             with c1:
-                target_list = st.selectbox("Choisir la Liste cible", manual_lists)
-                bad_name = st.text_input("Nom de la personne / Entité")
+                target_list = st.selectbox("Liste cible", manual_lists)
+                bad_name = st.text_input("Nom de la personne")
             with c2:
-                details = st.text_input("Motif / Détails")
+                details_man = st.text_input("Motif")
             
-            if st.button("Ajouter à la liste", type="primary"):
-                if bad_name and target_list:
-                    full_details = f"[{target_list}] {details}"
-                    payload = {"name": bad_name, "list_source": target_list}
-                    try:
-                        r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                        if r.status_code == 200:
-                            st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
-                            log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
-                        else: st.error("Erreur serveur ou format de donnée incorrect.")
-                    except Exception as e: st.error(f"Erreur: {e}")
-                else: st.warning("Veuillez remplir le nom et choisir une liste.")
+            if st.button("Ajouter à la liste"):
+                if bad_name:
+                    r = requests.post(f"{API_URL}/sanctions/", json={"name": bad_name, "list_source": target_list})
+                    if r.status_code == 200: 
+                        st.success("Ajouté"); log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, target_list)
+                    else: st.error("Erreur")
 
         with tabs[1]:
-            st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
-            target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
-            upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
-            
-            if upl_file and st.button("Importer les données 📥"):
-                try:
-                    df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
-                    st.write(f"Aperçu ({len(df)} entrées) :")
-                    st.dataframe(df.head(3))
-                    progress = st.progress(0); count_ok = 0
-                    for i, row in df.iterrows():
-                        name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
-                        if name_val != "Inconnu":
-                            payload = {"name": str(name_val), "list_source": target_list_import}
-                            r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                            if r.status_code == 200: 
-                                count_ok += 1
-                        progress.progress((i+1)/len(df))
-                    
-                    if count_ok > 0:
-                        st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
-                        log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
-                    else:
-                        st.error("❌ L'import a échoué. Vérifie que le Backend fonctionne.")
-                except Exception as e: st.error(f"Erreur de lecture : {e}")
+            target_list_import = st.selectbox("Sélectionner la Liste", get_all_lists())
+            upl_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
+            if upl_file and st.button("Importer 📥"):
+                df_imp = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
+                for i, r_imp in df_imp.iterrows():
+                    name_v = r_imp.get('Nom') or r_imp.get('Name') or "Inconnu"
+                    requests.post(f"{API_URL}/sanctions/", json={"name": str(name_v), "list_source": target_list_import})
+                st.success("Import terminé"); log_action(st.session_state["user_email"], "IMPORT", target_list_import, upl_file.name)
 
         with tabs[2]:
-            st.write("Définir une nouvelle catégorie de liste.")
-            new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
-            if st.button("Créer la Liste"):
-                if new_list_name:
-                    if new_list_name in get_all_lists(): st.warning("Cette liste existe déjà.")
-                    else:
-                        if add_custom_list(new_list_name):
-                            st.success(f"Liste '{new_list_name}' créée !")
-                            log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
-                            st.rerun()
-                        else: st.error("Erreur serveur.")
+            st.dataframe(get_logs(), use_container_width=True)
 
-        with tabs[3]:
-            st.write("Supprimer une catégorie de liste personnalisée.")
-            default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
-            all_custom = [L for L in get_all_lists() if L not in default_lists]
-            
-            if not all_custom:
-                st.info("Aucune liste personnalisée à supprimer. (Les listes par défaut ne peuvent pas être supprimées).")
-            else:
-                list_to_delete = st.selectbox("Choisir la liste à supprimer", all_custom)
-                if st.button("Supprimer cette liste"):
-                    if delete_custom_list(list_to_delete):
-                        st.success(f"Liste '{list_to_delete}' supprimée avec succès !")
-                        log_action(st.session_state["user_email"], "SUPPRESSION_LISTE", list_to_delete, "Catégorie supprimée")
-                        st.rerun()
-                    else: 
-                        st.error("Erreur lors de la suppression.")
-
-        with tabs[4]:
-            st.write("Historique des actions administratives (Sauvegardé dans le Cloud).")
-            df_logs = get_logs()
-            if not df_logs.empty and 'id' in df_logs.columns:
-                df_logs = df_logs.drop(columns=['id']) # On cache l'ID technique
-            st.dataframe(df_logs, use_container_width=True)
-            if st.button("Rafraîchir les logs"): st.rerun()
-
-    # === NOUVEL ONGLET : UTILISATEURS (ADMIN UNIQUEMENT) ===
+    # === UTILISATEURS ===
     elif menu == "👥 Utilisateurs":
-        st.subheader("👥 Gestion de l'Équipe et des Rôles")
-        
-        tab_list, tab_add = st.tabs(["📋 Liste des Membres", "➕ Ajouter un Compte"])
-        
-        with tab_list:
-            st.write("Utilisateurs enregistrés dans le système :")
-            df_users = get_users()
-            if not df_users.empty:
-                if 'id' in df_users.columns: df_users = df_users.drop(columns=['id'])
-                st.dataframe(df_users, use_container_width=True)
-            if st.button("Actualiser la liste"): st.rerun()
-            
-        with tab_add:
-            st.write("Créer un nouveau compte d'accès sécurisé.")
-            with st.form("new_user_form"):
-                n_email = st.text_input("Adresse Email")
-                n_name = st.text_input("Nom Complet")
-                n_pass = st.text_input("Mot de Passe", type="password")
-                n_role = st.selectbox("Rôle d'accès", ["AGENT", "ADMIN"])
-                
-                if st.form_submit_button("Créer le Compte", type="primary"):
-                    if n_email and n_name and n_pass:
-                        success, detail = create_user(n_email, n_pass, n_name, n_role)
-                        if success:
-                            st.success(f"✅ Compte {n_role} créé pour {n_name} !")
-                            log_action(st.session_state["user_email"], "CREATION_USER", n_email, f"Rôle: {n_role}")
-                        else:
-                            st.error(f"Erreur : Cet email est peut-être déjà utilisé.")
-                    else:
-                        st.warning("Veuillez remplir tous les champs.")
+        st.subheader("👥 Gestion de l'Équipe")
+        tab_l, tab_a = st.tabs(["📋 Liste", "➕ Ajouter"])
+        with tab_l:
+            st.dataframe(get_users(), use_container_width=True)
+        with tab_a:
+            with st.form("new_user"):
+                n_em = st.text_input("Email")
+                n_nm = st.text_input("Nom")
+                n_ps = st.text_input("Pass", type="password")
+                n_rl = st.selectbox("Rôle", ["AGENT", "ADMIN"])
+                if st.form_submit_button("Créer"):
+                    ok, msg = create_user(n_em, n_ps, n_nm, n_rl)
+                    if ok: st.success("Créé"); st.rerun()
+                    else: st.error("Erreur")
 
-
+else:
+    st.info("👈 Veuillez vous connecter via le menu à gauche.")
