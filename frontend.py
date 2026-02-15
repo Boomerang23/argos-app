@@ -385,7 +385,7 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-    # === NOUVEAU CENTRE D'ALERTES (Filtres, Priorité, Assignation) ===
+    # === CENTRE D'ALERTES ===
     elif menu == "🚦 Alertes":
         st.subheader("🚦 Centre de Traitement des Alertes")
         df_a = get_alerts()
@@ -396,7 +396,6 @@ if st.session_state["token"]:
             if 'created_at' in df_a.columns:
                 df_a['created_at'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
-            # --- NOUVEAU SP-GA-05 : Filtres ---
             st.write("### 🗂️ Filtres rapides")
             filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
             
@@ -405,10 +404,8 @@ if st.session_state["token"]:
             if df_filtered.empty:
                 st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
             else:
-                # --- NOUVEAU SP-GA-05 : Priorisation visuelle ---
                 df_filtered['Priorité'] = df_filtered['similarity_score'].apply(lambda x: '🔴 Haute' if x >= 90 else '🟠 Moyenne')
                 
-                # Formatage du sélecteur pour qu'il soit intuitif
                 alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['Priorité']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
                 alert_ids = df_filtered['id'].tolist()
                 
@@ -439,9 +436,8 @@ if st.session_state["token"]:
                     )
 
                 with col_form:
-                    st.markdown("### ✍️ Décision & Assignation")
+                    st.markdown("### ✍️ Décision & Preuves")
                     
-                    # --- NOUVEAU SP-GA-04 : Liste des agents ---
                     users_df = get_users()
                     agent_list = ["Non assigné"]
                     if not users_df.empty:
@@ -461,18 +457,29 @@ if st.session_state["token"]:
                                                    index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
                         
                         new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
+                        
+                        # --- NOUVEAU SP-GA-06 : UPLOAD DE PIÈCE JOINTE ---
+                        st.markdown("**📎 Pièces justificatives**")
+                        uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
 
                         if st.form_submit_button("Enregistrer la décision"):
+                            
+                            # Astuce : On grave le nom du fichier dans le commentaire !
+                            final_comm = new_comm
+                            if uploaded_file:
+                                final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
+
                             payload = {
                                 "status": new_status,
                                 "decision": new_decision,
-                                "comments": new_comm,
-                                "assigned_to": new_assignee # SP-GA-04 : Enregistrement de l'agent
+                                "comments": final_comm,
+                                "assigned_to": new_assignee
                             }
                             success, message = update_alert_api(sel_id, payload)
                             if success:
-                                st.success("✅ Dossier mis à jour et assigné avec succès !")
-                                log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Assigné: {new_assignee} | Décision: {new_decision}")
+                                st.success("✅ Dossier mis à jour avec succès !")
+                                file_log = f"| Fichier: {uploaded_file.name}" if uploaded_file else ""
+                                log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision} {file_log}")
                                 st.rerun()
                             else:
                                 st.error(f"❌ {message}")
