@@ -77,3 +77,14 @@ class CustomList(Base):
     name = Column(String, primary_key=True, index=True)
 
 
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    full_name = Column(String)
+    role = Column(String, default="AGENT") # Les rôles seront "ADMIN" ou "AGENT"
+    is_active = Column(Boolean, default=True)
+
+
+
