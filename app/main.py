@@ -72,22 +72,17 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
     screening_service = ScreeningService()
     matches = screening_service.check_name(db, client.full_name)
         
-    # 3. La Réponse Personnalisée
+   # 3. La Réponse Personnalisée
     if matches:
         criminel_trouve = matches[0]['matched_name']
+        liste_origine = "Liste de Surveillance" # Valeur de secours
         
-        # 🔍 SÉCURITÉ ANTI-CRASH : On cherche la liste d'origine proprement
-        import re
-        liste_origine = "Liste de Surveillance (Locale/Internationale)" # Valeur par défaut
-        
-        # On essaie de récupérer le profil
+        # On essaie de récupérer le profil complet
         profil = db.query(models.Sanction).filter(models.Sanction.name == criminel_trouve).first()
         
-        # On vérifie si le profil existe ET s'il possède bien l'attribut 'details' avant de le lire
-        if profil and hasattr(profil, 'details') and profil.details:
-            match = re.search(r'\[(.*?)\]', profil.details)
-            if match:
-                liste_origine = match.group(1)
+        # ON UTILISE list_source !
+        if profil and hasattr(profil, 'list_source') and profil.list_source:
+            liste_origine = profil.list_source
         
         return {
             "id": db_client.id,
@@ -148,6 +143,7 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
 
 
 
