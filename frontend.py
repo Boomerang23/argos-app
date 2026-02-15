@@ -157,13 +157,15 @@ def create_global_report(dataframe):
     styles = getSampleStyleSheet()
     elements.append(Paragraph("<b>Rapport Global de Conformité</b>", styles['Title']))
     elements.append(Spacer(1, 12))
-    rejected = len(dataframe[dataframe['Statut'].str.contains("REJETÉ") | dataframe['Statut'].str.contains("ALERTE")])
+    if 'Statut' in dataframe.columns:
+        rejected = len(dataframe[dataframe['Statut'].str.contains("REJETÉ") | dataframe['Statut'].str.contains("ALERTE")])
+    else: rejected = 0
     total = len(dataframe); compliant = total - rejected
     stats_text = f"Date : {datetime.now().strftime('%d/%m/%Y')}<br/>Total : {total} | Conformes : {compliant} | <b>Alertes : {rejected}</b>"
     elements.append(Paragraph(stats_text, styles['Normal']))
     elements.append(Spacer(1, 20))
     data = [["Nom du Client", "ID National", "Statut", "Détail"]]
-    for index, row in dataframe.iterrows(): data.append([str(row['Nom']), str(row['ID']), str(row['Statut']), str(row['Détail'])])
+    for index, row in dataframe.iterrows(): data.append([str(row.get('Nom', '')), str(row.get('ID', '')), str(row.get('Statut', '')), str(row.get('Détail', ''))])
     table = Table(data)
     table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -191,13 +193,14 @@ def create_investigation_pdf(row_data):
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, height - 160, "1. Détails de la Détection")
     c.setFont("Helvetica", 11)
-    c.drawString(60, height - 180, f"Date de création : {row_data.get('created_at', 'N/A')}")
+    c.drawString(60, height - 180, f"Date de création : {row_data.get('created_at_str', row_data.get('created_at', 'N/A'))}")
     c.drawString(60, height - 200, f"Client Scanné : {row_data.get('client_name', 'N/A')}")
     c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {row_data.get('matched_name', 'N/A')}")
     c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
+    c.drawString(60, height - 260, f"Délai (SLA) : {row_data.get('SLA', 'N/A')}")
     
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, height - 280, "2. Décision de Conformité et Traitement")
+    c.drawString(50, height - 300, "2. Décision de Conformité et Traitement")
     c.setFont("Helvetica", 11)
     
     statut = row_data.get('status', 'OUVERT')
@@ -208,18 +211,18 @@ def create_investigation_pdf(row_data):
     elif decision == "FAUX_POSITIF": color = colors.green
     else: color = colors.orange
     
-    c.drawString(60, height - 300, f"Statut actuel du dossier : {statut}")
+    c.drawString(60, height - 320, f"Statut actuel du dossier : {statut}")
     c.setFillColor(color)
-    c.drawString(60, height - 320, f"Décision finale : {decision}")
+    c.drawString(60, height - 340, f"Décision finale : {decision}")
     c.setFillColor(colors.black)
     
-    c.drawString(60, height - 350, "Commentaires de l'analyste / Justification :")
+    c.drawString(60, height - 370, "Commentaires de l'analyste / Justification :")
     
     comments = str(row_data.get('comments', 'Aucun commentaire.'))
     if comments in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
     
     lines = textwrap.wrap(comments, width=80) 
-    y_pos = height - 370
+    y_pos = height - 390
     for line in lines:
         c.drawString(70, y_pos, line)
         y_pos -= 20 
@@ -393,8 +396,33 @@ if st.session_state["token"]:
         if df_a.empty:
             st.info("RAS : Aucune alerte en attente de traitement.")
         else:
+            # --- NOUVEAU SP-GA-07 : Moteur de SLA (Délais) ---
+            now = datetime.now()
+            
+            def calculate_sla(row):
+                if row['status'] == 'FERME':
+                    return "✅ Traité"
+                
+                try:
+                    # Conversion de la date pour le calcul
+                    created_dt = pd.to_datetime(row['created_at']).replace(tzinfo=None)
+                    delta_hours = (now - created_dt).total_seconds() / 3600
+                    
+                    if delta_hours > 48:
+                        return "🚨 HORS DÉLAI (>48h)"
+                    elif delta_hours > 24:
+                        return "⚠️ Attention (>24h)"
+                    else:
+                        return "🟢 Dans les temps"
+                except:
+                    return "Inconnu"
+
+            # Application de la règle SLA
+            df_a['SLA'] = df_a.apply(calculate_sla, axis=1)
+            
+            # Formatage de la date pour un affichage lisible
             if 'created_at' in df_a.columns:
-                df_a['created_at'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+                df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
             st.write("### 🗂️ Filtres rapides")
             filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
@@ -406,7 +434,7 @@ if st.session_state["token"]:
             else:
                 df_filtered['Priorité'] = df_filtered['similarity_score'].apply(lambda x: '🔴 Haute' if x >= 90 else '🟠 Moyenne')
                 
-                alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['Priorité']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
+                alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['SLA']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
                 alert_ids = df_filtered['id'].tolist()
                 
                 sel_index = st.selectbox("🎯 Sélectionner le dossier à traiter", range(len(alert_options)), format_func=lambda x: alert_options[x])
@@ -417,11 +445,19 @@ if st.session_state["token"]:
                 
                 with col_inf:
                     st.markdown(f"### 📁 Dossier #{sel_id}")
-                    st.write(f"**Priorité :** {row['Priorité']}")
+                    # Affichage du SLA en rouge si hors délai
+                    if "HORS DÉLAI" in row['SLA']:
+                        st.error(f"**Délai de traitement (SLA) : {row['SLA']}**")
+                    elif "Attention" in row['SLA']:
+                        st.warning(f"**Délai de traitement (SLA) : {row['SLA']}**")
+                    else:
+                        st.success(f"**Délai de traitement (SLA) : {row['SLA']}**")
+
+                    st.write(f"**Priorité IA :** {row['Priorité']}")
                     st.write(f"**Client scanné :** {row['client_name']}")
                     st.write(f"**Cible détectée :** {row['matched_name']}")
                     st.write(f"**Score de similitude :** {row['similarity_score']}%")
-                    st.write(f"**Date d'ouverture :** {row['created_at']}")
+                    st.write(f"**Date d'ouverture :** {row['created_at_str']}")
                     st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
                     st.info(f"**Statut actuel :** {row['status']}")
                     
@@ -458,13 +494,10 @@ if st.session_state["token"]:
                         
                         new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
                         
-                        # --- NOUVEAU SP-GA-06 : UPLOAD DE PIÈCE JOINTE ---
                         st.markdown("**📎 Pièces justificatives**")
                         uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
 
                         if st.form_submit_button("Enregistrer la décision"):
-                            
-                            # Astuce : On grave le nom du fichier dans le commentaire !
                             final_comm = new_comm
                             if uploaded_file:
                                 final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
@@ -486,7 +519,9 @@ if st.session_state["token"]:
 
             st.markdown("---")
             st.write("### 📋 Historique Complet (Filtré)")
-            st.dataframe(df_filtered, use_container_width=True)
+            # On affiche les colonnes importantes pour éviter d'avoir un tableau illisible
+            columns_to_show = ['id', 'SLA', 'Priorité', 'client_name', 'status', 'assigned_to', 'created_at_str']
+            st.dataframe(df_filtered[columns_to_show], use_container_width=True)
 
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
