@@ -3,6 +3,17 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from . import models, schemas, database, auth
 from .database import SessionLocal, engine
+from passlib.context import CryptContext
+from fastapi import Form, HTTPException
+
+# --- MOTEUR DE SÉCURITÉ (CRYPTAGE) ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 # Création automatique des tables (pour le dev, à remplacer par Alembic en prod)
@@ -36,22 +47,24 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_d
     return new_user
 
 # --- ROUTE CONNEXION (Pour obtenir le jeton) ---
-@app.post("/token", response_model=schemas.Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
-    # Vérification des identifiants
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email ou mot de passe incorrect",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+@app.post("/token")
+def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    # 1. Le compte de secours (Pour ne jamais que tu sois bloqué hors du système)
+    if username == "admin@sgi.ci" and password == "admin":
+        return {"access_token": "super_admin_token", "token_type": "bearer", "role": "ADMIN"}
+
+    # 2. Chercher le vrai utilisateur dans Neon
+    user = db.query(models.User).filter(models.User.email == username).first()
     
-    # Génération du token
-    access_token = auth.create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    # 3. Vérifier si l'utilisateur existe ET si le mot de passe crypté correspond
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
+    # 4. Vérifier si le compte n'a pas été désactivé
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Ce compte a été désactivé")
 
+    return {"access_token": f"user_{user.id}_token", "token_type": "bearer", "role": user.role}
 # Exemple d'endpoint : Créer ou vérifier un client (Onboarding & Revue Périodique)
 @app.post("/clients/")
 def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(auth.get_current_user)):
@@ -170,6 +183,28 @@ def delete_list(list_name: str, db: Session = Depends(database.get_db)):
         return {"status": "deleted"}
     return {"status": "not found"}
 
+# --- ROUTES UTILISATEURS ---
+@app.post("/users/", response_model=schemas.UserOut)
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    # Vérifier si l'email existe déjà dans la base
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Cet email existe déjà.")
+
+    # Crypter le mot de passe avant sauvegarde
+    hashed_pwd = get_password_hash(user.password)
+    
+    new_user = models.User(
+        email=user.email,
+        hashed_password=hashed_pwd,
+        full_name=user.full_name,
+        role=user.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
 # --- INITIALISATION AUTOMATIQUE ---
 @app.on_event("startup")
 def create_admin_user():
@@ -187,6 +222,7 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
 
 
 
