@@ -230,6 +230,7 @@ if st.session_state["token"]:
                             d = r.json()
                             risk = d.get("risk_score")
                             details = d.get("details", "Non spécifié")
+                            sim_score = d.get("similarity_score", 0) # <-- On récupère le chiffre de l'IA
                             status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
                             
                             res_col1, res_col2 = st.columns([1, 1])
@@ -237,16 +238,16 @@ if st.session_state["token"]:
                             with res_col1:
                                 st.write("### 📝 Rapport d'Analyse")
                                 if status == "ALERTE": 
-                                    st.error(f"🚨 {details}") 
+                                    st.error(f"{details}") # J'ai enlevé l'émoji 🚨 en double
                                 else: 
-                                    st.success(f"✅ RAS - Client Conforme")
-                                    details = "RAS"
+                                    st.success(f"{details}")
                                 
                                 pdf = create_kyc_pdf(name, nid, status, details)
                                 st.download_button("Télécharger Rapport PDF", pdf, "rapport_kyc.pdf", "application/pdf")
                             
                             with res_col2:
-                                score_val = 95 if status == "ALERTE" else 10
+                                # LA JAUGE DYNAMIQUE !
+                                score_val = sim_score if status == "ALERTE" else 10
                                 bar_color = "red" if status == "ALERTE" else "green"
                                 
                                 fig = go.Figure(go.Indicator(
@@ -431,4 +432,5 @@ if st.session_state["token"]:
                             st.error(f"Erreur : Cet email est peut-être déjà utilisé.")
                     else:
                         st.warning("Veuillez remplir tous les champs.")
+
 
