@@ -88,3 +88,20 @@ class ScanHistoryCreate(BaseModel):
 
 class CustomListCreate(BaseModel):
     name: str
+
+# --- USER SCHEMAS ---
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: str = "AGENT"
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    role: str
+    is_active: bool
+
+    class Config:
+        from_attributes = True
