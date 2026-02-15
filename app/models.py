@@ -43,7 +43,7 @@ class Sanction(Base):
     name = Column(String, index=True)
     list_source = Column(String)
     added_at = Column(DateTime, default=datetime.utcnow)
-    details = Column(String, nullable=True)
+    
 
 # 3. Table des UTILISATEURS
 class User(Base):
@@ -53,3 +53,4 @@ class User(Base):
     email = Column(String, unique=True, index=True)
 
     hashed_password = Column(String)
+
