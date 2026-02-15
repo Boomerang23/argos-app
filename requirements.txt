@@ -19,5 +19,6 @@ openpyxl
 psycopg2-binary
 passlib[bcrypt]
 bcrypt
+rapidfuzz
 
 
