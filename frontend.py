@@ -93,7 +93,7 @@ def create_user(email, password, full_name, role):
     except Exception as e:
         return False, str(e)
 
-# --- NOUVEAU : GESTION DES ALERTES (TICKETS) ---
+# --- GESTION DES ALERTES (TICKETS) ---
 def get_alerts():
     try:
         r = requests.get(f"{API_URL}/alerts/")
@@ -156,6 +156,71 @@ def create_global_report(dataframe):
                                ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
     elements.append(table); doc.build(elements); buffer.seek(0)
     return buffer
+
+# --- NOUVEAU : PDF D'INVESTIGATION D'ALERTE ---
+def create_investigation_pdf(row_data):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    
+    # En-tête
+    c.setFont("Helvetica-Bold", 24)
+    c.drawString(50, height - 50, "ARGOS 360°")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, height - 70, "Rapport Officiel d'Investigation AML/KYC")
+    c.setLineWidth(2)
+    c.line(50, height - 80, width - 50, height - 80)
+    
+    # Titre du dossier
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width / 2, height - 120, f"DOSSIER D'ALERTE #{row_data.get('id', 'N/A')}")
+    
+    # Informations générales
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, height - 160, "1. Détails de la Détection")
+    c.setFont("Helvetica", 11)
+    c.drawString(60, height - 180, f"Date de création : {row_data.get('created_at', 'N/A')}")
+    c.drawString(60, height - 200, f"Client Scanné : {row_data.get('client_name', 'N/A')}")
+    c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {row_data.get('matched_name', 'N/A')}")
+    c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
+    
+    # Traitement
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, height - 280, "2. Décision de Conformité et Traitement")
+    c.setFont("Helvetica", 11)
+    
+    statut = row_data.get('status', 'OUVERT')
+    decision = row_data.get('decision', 'EN_ATTENTE')
+    if not decision: decision = "EN_ATTENTE"
+    
+    if decision == "CONFIRME": color = colors.red
+    elif decision == "FAUX_POSITIF": color = colors.green
+    else: color = colors.orange
+    
+    c.drawString(60, height - 300, f"Statut actuel du dossier : {statut}")
+    c.setFillColor(color)
+    c.drawString(60, height - 320, f"Décision finale : {decision}")
+    c.setFillColor(colors.black)
+    
+    c.drawString(60, height - 350, "Commentaires de l'analyste / Justification :")
+    
+    comments = str(row_data.get('comments', 'Aucun commentaire.'))
+    if comments in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
+    
+    lines = textwrap.wrap(comments, width=80) 
+    y_pos = height - 370
+    for line in lines:
+        c.drawString(70, y_pos, line)
+        y_pos -= 20 
+        
+    # Signature / Bas de page
+    c.setFont("Helvetica-Oblique", 10)
+    c.drawString(50, 50, f"Document généré par le système ARGOS le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}")
+    
+    c.save()
+    buffer.seek(0)
+    return buffer
+
 
 # --- TITRE ---
 st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", unsafe_allow_html=True)
@@ -240,7 +305,7 @@ if st.session_state["token"]:
             if st.button("Lancer Scan", type="primary"):
                 if name:
                     try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "national_id": nid})
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
                         if r.status_code == 200:
                             d = r.json()
                             risk = d.get("risk_score")
@@ -299,7 +364,7 @@ if st.session_state["token"]:
                     n = row.get('Nom', row.get('Name', 'Inconnu'))
                     client_id = row.get('ID', row.get('Matricule', 'N/A'))
                     try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "national_id": str(client_id)})
+                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
                         rk = r.json().get("risk_score", "Low")
                         stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
                         res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
@@ -320,7 +385,6 @@ if st.session_state["token"]:
         if df_a.empty:
             st.info("RAS : Aucune alerte en attente de traitement.")
         else:
-            # Formatage de la date pour l'affichage
             if 'created_at' in df_a.columns:
                 df_a['created_at'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
@@ -336,6 +400,17 @@ if st.session_state["token"]:
                 st.write(f"**Score de similitude :** {row['similarity_score']}%")
                 st.write(f"**Date d'ouverture :** {row['created_at']}")
                 st.info(f"**Statut actuel :** {row['status']}")
+                
+                # --- NOUVEAU : BOUTON DE TÉLÉCHARGEMENT PDF ---
+                st.markdown("---")
+                investigation_pdf = create_investigation_pdf(row.to_dict())
+                st.download_button(
+                    label="📄 Télécharger le Rapport d'Investigation",
+                    data=investigation_pdf,
+                    file_name=f"rapport_investigation_alerte_{sel_id}.pdf",
+                    mime="application/pdf",
+                    type="secondary"
+                )
 
             with col_form:
                 st.markdown("### ✍️ Décision de Conformité")
@@ -343,7 +418,6 @@ if st.session_state["token"]:
                     new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], 
                                              index=["OUVERT", "EN_COURS", "FERME"].index(row['status']))
                     
-                    # Logique pour indexer la décision actuelle ou mettre 0 par défaut
                     current_dec = row['decision'] if row['decision'] else "EN_ATTENTE"
                     new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"],
                                                index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
