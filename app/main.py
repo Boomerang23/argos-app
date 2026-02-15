@@ -1,10 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from . import models, schemas, database, auth
 from .database import SessionLocal, engine
 from passlib.context import CryptContext
-from fastapi import Form, HTTPException
 
 # --- MOTEUR DE SÉCURITÉ (CRYPTAGE) ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -16,7 +15,7 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 
-# Création automatique des tables (pour le dev, à remplacer par Alembic en prod)
+# Création automatique des tables
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(
@@ -30,25 +29,9 @@ app = FastAPI(
 def read_root():
     return {"status": "active", "system": "AML Core", "compliance_zone": "UEMOA"}
 
-# --- ROUTE INSCRIPTION ---
-@app.post("/register", response_model=schemas.UserOut)
-def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
-    # Vérifie si l'email existe déjà
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email déjà utilisé")
-    
-    # Hachage du mot de passe et sauvegarde
-    hashed_password = auth.get_password_hash(user.password)
-    new_user = models.User(email=user.email, hashed_password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
 # --- ROUTE CONNEXION (Pour obtenir le jeton) ---
 @app.post("/token")
-def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(database.get_db)):
     # 1. Le compte de secours (Pour ne jamais que tu sois bloqué hors du système)
     if username == "admin@sgi.ci" and password == "admin":
         return {"access_token": "super_admin_token", "token_type": "bearer", "role": "ADMIN"}
@@ -65,9 +48,11 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
         raise HTTPException(status_code=400, detail="Ce compte a été désactivé")
 
     return {"access_token": f"user_{user.id}_token", "token_type": "bearer", "role": user.role}
-# Exemple d'endpoint : Créer ou vérifier un client (Onboarding & Revue Périodique)
+
+
+# --- ROUTES CLIENTS & SCREENING ---
 @app.post("/clients/")
-def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(auth.get_current_user)):
+def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(database.get_db)):
     
     # 1. Enregistrement ou mise à jour du client scanné
     db_client = db.query(models.Client).filter(models.Client.national_id == client.national_id).first()
@@ -112,8 +97,9 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "risk_score": "FAIBLE",
             "details": "RAS"
         }
+
 @app.post("/sanctions/", response_model=schemas.SanctionOut)
-def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(auth.get_current_user)):
+def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db)):
     db_sanction = models.Sanction(**sanction.dict())
     db.add(db_sanction)
     db.commit()
@@ -123,9 +109,8 @@ def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(databas
 from .services import ScreeningService
 
 @app.post("/screening/check", response_model=schemas.ScreeningResult)
-def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(database.get_db)): # <-- Ajout de db
+def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(database.get_db)): 
     service = ScreeningService()
-    # On passe 'db' ici aussi
     matches = service.check_name(db, request.name)
     
     risk = "FAIBLE"
@@ -136,11 +121,10 @@ def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(databas
         "input_name": request.name,
         "matches": matches,
         "risk_level": risk
-
     }
 
-# --- ROUTES POUR L'HISTORIQUE ET LES LOGS CLOUD ---
 
+# --- ROUTES POUR L'HISTORIQUE ET LES LOGS CLOUD ---
 @app.post("/logs/")
 def create_log(log: schemas.AuditLogCreate, db: Session = Depends(database.get_db)):
     db_log = models.AuditLog(**log.dict())
@@ -183,9 +167,10 @@ def delete_list(list_name: str, db: Session = Depends(database.get_db)):
         return {"status": "deleted"}
     return {"status": "not found"}
 
+
 # --- ROUTES UTILISATEURS ---
 @app.post("/users/", response_model=schemas.UserOut)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def create_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     # Vérifier si l'email existe déjà dans la base
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
@@ -205,6 +190,11 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
+@app.get("/users/")
+def get_users(db: Session = Depends(database.get_db)):
+    return db.query(models.User).all()
+
+
 # --- INITIALISATION AUTOMATIQUE ---
 @app.on_event("startup")
 def create_admin_user():
@@ -216,16 +206,9 @@ def create_admin_user():
     user = db.query(models.User).filter(models.User.email == "admin@sgi.ci").first()
     if not user:
         print("⚠️ Création de l'utilisateur ADMIN...")
-        hashed_password = auth.get_password_hash("admin")
-        db_user = models.User(email="admin@sgi.ci", hashed_password=hashed_password)
+        hashed_password = get_password_hash("admin") # Correction ici
+        db_user = models.User(email="admin@sgi.ci", hashed_password=hashed_password, full_name="Super Administrateur", role="ADMIN")
         db.add(db_user)
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
-
-
-
-
-
-
-
