@@ -54,3 +54,26 @@ class User(Base):
 
     hashed_password = Column(String)
 
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String)
+    user_email = Column(String)
+    action = Column(String)
+    target = Column(String)
+    details = Column(String)
+
+class ScanHistory(Base):
+    __tablename__ = "scan_history"
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(String)
+    client_name = Column(String)
+    status = Column(String)
+    details = Column(String)
+
+class CustomList(Base):
+    __tablename__ = "custom_lists"
+    name = Column(String, primary_key=True, index=True)
+
+
