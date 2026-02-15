@@ -76,6 +76,23 @@ def load_stats():
     except: pass
     return pd.DataFrame(columns=["date", "client_name", "status", "details"])
 
+# --- NOUVEAU : GESTION DES UTILISATEURS ---
+def get_users():
+    try:
+        r = requests.get(f"{API_URL}/users/")
+        if r.status_code == 200 and r.json():
+            return pd.DataFrame(r.json())
+    except: pass
+    return pd.DataFrame(columns=["id", "email", "full_name", "role", "is_active"])
+
+def create_user(email, password, full_name, role):
+    payload = {"email": email, "password": password, "full_name": full_name, "role": role}
+    try:
+        r = requests.post(f"{API_URL}/users/", json=payload)
+        return r.status_code == 200, r.text
+    except Exception as e:
+        return False, str(e)
+
 
 # --- FONCTIONS PDF ---
 def create_kyc_pdf(client_name, client_id, status, risk_details):
@@ -133,6 +150,7 @@ st.markdown("<hr>", unsafe_allow_html=True)
 # --- LOGIN ---
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
+if "role" not in st.session_state: st.session_state["role"] = "" # NOUVEAU : Sauvegarde du Rôle
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/9370/9370273.png", width=50)
@@ -148,8 +166,10 @@ with st.sidebar:
             try:
                 res = requests.post(f"{API_URL}/token", data={"username": email, "password": password})
                 if res.status_code == 200: 
-                    st.session_state["token"] = res.json().get("access_token")
+                    data = res.json()
+                    st.session_state["token"] = data.get("access_token")
                     st.session_state["user_email"] = email
+                    st.session_state["role"] = data.get("role", "AGENT") # On récupère le rôle de la DB !
                     st.success("✅ Connexion réussie !")
                     st.rerun()
                 else: 
@@ -158,18 +178,23 @@ with st.sidebar:
                 st.error("⛔ Serveur inaccessible (Réveil en cours...)")
     
     else:
-        st.success(f"👤 {st.session_state['user_email']}")
+        st.success(f"👤 {st.session_state['user_email']} ({st.session_state['role']})")
         if st.button("Se déconnecter"): 
             st.session_state["token"] = None
             st.session_state["user_email"] = ""
+            st.session_state["role"] = ""
             st.rerun()
 
 # --- APP PRINCIPALE ---
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
-    # NAVIGATION
-    menu = st.sidebar.radio("Menu", ["📊 Tableau de Bord", "🔍 Vérifications", "⚙️ Gestion des Listes"])
+    # NAVIGATION DYNAMIQUE SELON LE RÔLE
+    menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "⚙️ Gestion des Listes"]
+    if st.session_state["role"] == "ADMIN":
+        menu_options.append("👥 Utilisateurs") # Ajouté uniquement pour les Admins
+        
+    menu = st.sidebar.radio("Menu", menu_options)
 
     # === TABLEAU DE BORD ===
     if menu == "📊 Tableau de Bord":
@@ -373,5 +398,36 @@ if st.session_state["token"]:
                 df_logs = df_logs.drop(columns=['id']) # On cache l'ID technique
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
-else:
-    st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
+    # === NOUVEL ONGLET : UTILISATEURS (ADMIN UNIQUEMENT) ===
+    elif menu == "👥 Utilisateurs":
+        st.subheader("👥 Gestion de l'Équipe et des Rôles")
+        
+        tab_list, tab_add = st.tabs(["📋 Liste des Membres", "➕ Ajouter un Compte"])
+        
+        with tab_list:
+            st.write("Utilisateurs enregistrés dans le système :")
+            df_users = get_users()
+            if not df_users.empty:
+                if 'id' in df_users.columns: df_users = df_users.drop(columns=['id'])
+                st.dataframe(df_users, use_container_width=True)
+            if st.button("Actualiser la liste"): st.rerun()
+            
+        with tab_add:
+            st.write("Créer un nouveau compte d'accès sécurisé.")
+            with st.form("new_user_form"):
+                n_email = st.text_input("Adresse Email")
+                n_name = st.text_input("Nom Complet")
+                n_pass = st.text_input("Mot de Passe", type="password")
+                n_role = st.selectbox("Rôle d'accès", ["AGENT", "ADMIN"])
+                
+                if st.form_submit_button("Créer le Compte", type="primary"):
+                    if n_email and n_name and n_pass:
+                        success, detail = create_user(n_email, n_pass, n_name, n_role)
+                        if success:
+                            st.success(f"✅ Compte {n_role} créé pour {n_name} !")
+                            log_action(st.session_state["user_email"], "CREATION_USER", n_email, f"Rôle: {n_role}")
+                        else:
+                            st.error(f"Erreur : Cet email est peut-être déjà utilisé.")
+                    else:
+                        st.warning("Veuillez remplir tous les champs.")
