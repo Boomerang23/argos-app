@@ -74,6 +74,17 @@ def add_custom_list(name):
     except:
         return False
 
+def delete_custom_list(name):
+    try:
+        conn = sqlite3.connect('argos_history.db')
+        c = conn.cursor()
+        c.execute("DELETE FROM custom_lists WHERE name = ?", (name,))
+        conn.commit()
+        conn.close()
+        return True
+    except:
+        return False
+
 def save_scan(client_name, status, details):
     conn = sqlite3.connect('argos_history.db')
     c = conn.cursor()
@@ -298,7 +309,7 @@ if st.session_state["token"]:
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes de Sanctions & PEP")
         
-        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier (Update)", "➕ Créer une Liste", "📜 Logs (Audit)"])
+        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
 
         with tabs[0]:
             st.info("Ajouter individuellement une personne à une liste locale.")
@@ -369,13 +380,34 @@ if st.session_state["token"]:
                             st.rerun()
                         else: st.error("Erreur base de données locale.")
 
+        # 4. SUPPRIMER LISTE
         with tabs[3]:
+            st.write("Supprimer une catégorie de liste personnalisée.")
+            # On ne permet pas de supprimer les 3 listes par défaut du système
+            default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
+            all_custom = [L for L in get_all_lists() if L not in default_lists]
+            
+            if not all_custom:
+                st.info("Aucune liste personnalisée à supprimer. (Les listes par défaut ne peuvent pas être supprimées).")
+            else:
+                list_to_delete = st.selectbox("Choisir la liste à supprimer", all_custom)
+                if st.button("Supprimer cette liste"):
+                    if delete_custom_list(list_to_delete):
+                        st.success(f"Liste '{list_to_delete}' supprimée avec succès !")
+                        log_action(st.session_state["user_email"], "SUPPRESSION_LISTE", list_to_delete, "Catégorie supprimée")
+                        st.rerun()
+                    else: 
+                        st.error("Erreur lors de la suppression.")
+
+        # 5. LOGS 
+        with tabs[4]:
             st.write("Historique des actions administratives.")
             df_logs = get_logs()
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
 
 
 
