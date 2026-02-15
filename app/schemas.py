@@ -69,4 +69,22 @@ class UserOut(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+
     token_type: str
+
+
+class AuditLogCreate(BaseModel):
+    timestamp: str
+    user_email: str
+    action: str
+    target: str
+    details: str
+
+class ScanHistoryCreate(BaseModel):
+    date: str
+    client_name: str
+    status: str
+    details: str
+
+class CustomListCreate(BaseModel):
+    name: str
