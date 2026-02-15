@@ -126,6 +126,50 @@ def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(databas
 
     }
 
+# --- ROUTES POUR L'HISTORIQUE ET LES LOGS CLOUD ---
+
+@app.post("/logs/")
+def create_log(log: schemas.AuditLogCreate, db: Session = Depends(database.get_db)):
+    db_log = models.AuditLog(**log.dict())
+    db.add(db_log)
+    db.commit()
+    return {"status": "ok"}
+
+@app.get("/logs/")
+def get_logs(db: Session = Depends(database.get_db)):
+    return db.query(models.AuditLog).order_by(models.AuditLog.id.desc()).all()
+
+@app.post("/history/")
+def create_history(hist: schemas.ScanHistoryCreate, db: Session = Depends(database.get_db)):
+    db_hist = models.ScanHistory(**hist.dict())
+    db.add(db_hist)
+    db.commit()
+    return {"status": "ok"}
+
+@app.get("/history/")
+def get_history(db: Session = Depends(database.get_db)):
+    return db.query(models.ScanHistory).all()
+
+@app.post("/lists/")
+def create_list(lst: schemas.CustomListCreate, db: Session = Depends(database.get_db)):
+    db_lst = models.CustomList(name=lst.name)
+    db.add(db_lst)
+    db.commit()
+    return {"status": "ok"}
+
+@app.get("/lists/")
+def get_lists(db: Session = Depends(database.get_db)):
+    return db.query(models.CustomList).all()
+
+@app.delete("/lists/{list_name}")
+def delete_list(list_name: str, db: Session = Depends(database.get_db)):
+    db_lst = db.query(models.CustomList).filter(models.CustomList.name == list_name).first()
+    if db_lst:
+        db.delete(db_lst)
+        db.commit()
+        return {"status": "deleted"}
+    return {"status": "not found"}
+
 # --- INITIALISATION AUTOMATIQUE ---
 @app.on_event("startup")
 def create_admin_user():
@@ -143,6 +187,7 @@ def create_admin_user():
         db.commit()
         print("✅ Admin créé avec succès !")
     db.close()
+
 
 
 
