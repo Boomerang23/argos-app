@@ -173,13 +173,11 @@ def create_global_report(dataframe):
     buffer.seek(0)
     return buffer
 
-# --- NOUVEAU : PDF D'INVESTIGATION D'ALERTE ---
 def create_investigation_pdf(row_data):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
     
-    # En-tête
     c.setFont("Helvetica-Bold", 24)
     c.drawString(50, height - 50, "ARGOS 360°")
     c.setFont("Helvetica", 12)
@@ -187,11 +185,9 @@ def create_investigation_pdf(row_data):
     c.setLineWidth(2)
     c.line(50, height - 80, width - 50, height - 80)
     
-    # Titre du dossier
     c.setFont("Helvetica-Bold", 16)
     c.drawCentredString(width / 2, height - 120, f"DOSSIER D'ALERTE #{row_data.get('id', 'N/A')}")
     
-    # Informations générales
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, height - 160, "1. Détails de la Détection")
     c.setFont("Helvetica", 11)
@@ -200,7 +196,6 @@ def create_investigation_pdf(row_data):
     c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {row_data.get('matched_name', 'N/A')}")
     c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
     
-    # Traitement
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, height - 280, "2. Décision de Conformité et Traitement")
     c.setFont("Helvetica", 11)
@@ -229,7 +224,6 @@ def create_investigation_pdf(row_data):
         c.drawString(70, y_pos, line)
         y_pos -= 20 
         
-    # Signature / Bas de page
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(50, 50, f"Document généré par le système ARGOS le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}")
     
@@ -284,7 +278,6 @@ with st.sidebar:
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
-    # NAVIGATION DYNAMIQUE SELON LE RÔLE
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
     if st.session_state["role"] == "ADMIN":
         menu_options.append("👥 Utilisateurs") 
@@ -392,7 +385,7 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-    # === CENTRE D'ALERTES ===
+    # === NOUVEAU CENTRE D'ALERTES (Filtres, Priorité, Assignation) ===
     elif menu == "🚦 Alertes":
         st.subheader("🚦 Centre de Traitement des Alertes")
         df_a = get_alerts()
@@ -403,58 +396,90 @@ if st.session_state["token"]:
             if 'created_at' in df_a.columns:
                 df_a['created_at'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
-            sel_id = st.selectbox("🎯 Sélectionner un Dossier d'Alerte (ID)", df_a['id'].tolist())
-            row = df_a[df_a['id'] == sel_id].iloc[0]
-
-            col_inf, col_form = st.columns(2)
+            # --- NOUVEAU SP-GA-05 : Filtres ---
+            st.write("### 🗂️ Filtres rapides")
+            filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
             
-            with col_inf:
-                st.markdown(f"### 📁 Dossier #{sel_id}")
-                st.write(f"**Client scanné :** {row['client_name']}")
-                st.write(f"**Cible détectée :** {row['matched_name']}")
-                st.write(f"**Score de similitude :** {row['similarity_score']}%")
-                st.write(f"**Date d'ouverture :** {row['created_at']}")
-                st.info(f"**Statut actuel :** {row['status']}")
+            df_filtered = df_a if filter_stat == "Toutes" else df_a[df_a['status'] == filter_stat]
+            
+            if df_filtered.empty:
+                st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
+            else:
+                # --- NOUVEAU SP-GA-05 : Priorisation visuelle ---
+                df_filtered['Priorité'] = df_filtered['similarity_score'].apply(lambda x: '🔴 Haute' if x >= 90 else '🟠 Moyenne')
                 
-                st.markdown("---")
-                investigation_pdf = create_investigation_pdf(row.to_dict())
-                st.download_button(
-                    label="📄 Télécharger le Rapport d'Investigation",
-                    data=investigation_pdf,
-                    file_name=f"rapport_investigation_alerte_{sel_id}.pdf",
-                    mime="application/pdf",
-                    type="secondary"
-                )
+                # Formatage du sélecteur pour qu'il soit intuitif
+                alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['Priorité']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
+                alert_ids = df_filtered['id'].tolist()
+                
+                sel_index = st.selectbox("🎯 Sélectionner le dossier à traiter", range(len(alert_options)), format_func=lambda x: alert_options[x])
+                sel_id = alert_ids[sel_index]
+                row = df_filtered.iloc[sel_index]
 
-            with col_form:
-                st.markdown("### ✍️ Décision de Conformité")
-                with st.form("alert_update_form"):
-                    new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], 
-                                             index=["OUVERT", "EN_COURS", "FERME"].index(row['status']))
+                col_inf, col_form = st.columns(2)
+                
+                with col_inf:
+                    st.markdown(f"### 📁 Dossier #{sel_id}")
+                    st.write(f"**Priorité :** {row['Priorité']}")
+                    st.write(f"**Client scanné :** {row['client_name']}")
+                    st.write(f"**Cible détectée :** {row['matched_name']}")
+                    st.write(f"**Score de similitude :** {row['similarity_score']}%")
+                    st.write(f"**Date d'ouverture :** {row['created_at']}")
+                    st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
+                    st.info(f"**Statut actuel :** {row['status']}")
                     
-                    current_dec = row['decision'] if row['decision'] else "EN_ATTENTE"
-                    new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"],
-                                               index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
-                    
-                    new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
+                    st.markdown("---")
+                    investigation_pdf = create_investigation_pdf(row.to_dict())
+                    st.download_button(
+                        label="📄 Télécharger le Rapport d'Investigation",
+                        data=investigation_pdf,
+                        file_name=f"rapport_investigation_alerte_{sel_id}.pdf",
+                        mime="application/pdf",
+                        type="secondary"
+                    )
 
-                    if st.form_submit_button("Enregistrer la décision"):
-                        payload = {
-                            "status": new_status,
-                            "decision": new_decision,
-                            "comments": new_comm
-                        }
-                        success, message = update_alert_api(sel_id, payload)
-                        if success:
-                            st.success("✅ Décision enregistrée avec succès !")
-                            log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision}")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {message}")
+                with col_form:
+                    st.markdown("### ✍️ Décision & Assignation")
+                    
+                    # --- NOUVEAU SP-GA-04 : Liste des agents ---
+                    users_df = get_users()
+                    agent_list = ["Non assigné"]
+                    if not users_df.empty:
+                        agent_list += users_df['email'].tolist()
+                    
+                    current_assignee = row.get('assigned_to', 'Non assigné')
+                    if current_assignee not in agent_list: current_assignee = "Non assigné"
+
+                    with st.form("alert_update_form"):
+                        new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
+                        
+                        new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], 
+                                                 index=["OUVERT", "EN_COURS", "FERME"].index(row['status']))
+                        
+                        current_dec = row['decision'] if row['decision'] else "EN_ATTENTE"
+                        new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"],
+                                                   index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
+                        
+                        new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
+
+                        if st.form_submit_button("Enregistrer la décision"):
+                            payload = {
+                                "status": new_status,
+                                "decision": new_decision,
+                                "comments": new_comm,
+                                "assigned_to": new_assignee # SP-GA-04 : Enregistrement de l'agent
+                            }
+                            success, message = update_alert_api(sel_id, payload)
+                            if success:
+                                st.success("✅ Dossier mis à jour et assigné avec succès !")
+                                log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Assigné: {new_assignee} | Décision: {new_decision}")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
 
             st.markdown("---")
-            st.write("### 📋 Historique Complet des Alertes")
-            st.dataframe(df_a, use_container_width=True)
+            st.write("### 📋 Historique Complet (Filtré)")
+            st.dataframe(df_filtered, use_container_width=True)
 
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
