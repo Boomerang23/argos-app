@@ -315,7 +315,8 @@ if st.session_state["token"]:
             if st.button("Ajouter à la liste", type="primary"):
                 if bad_name and target_list:
                     full_details = f"[{target_list}] {details}"
-                    payload = {"name": bad_name, "risk_level": "High", "details": full_details}
+                   # On envoie list_source au lieu de details
+                    payload = {"name": bad_name, "list_source": target_list}
                     try:
                         r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
                         if r.status_code == 200:
@@ -340,7 +341,8 @@ if st.session_state["token"]:
                         name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
                         if name_val != "Inconnu":
                             full_details = f"[{target_list_import}] IMPORT FICHIER"
-                            payload = {"name": str(name_val), "risk_level": "High", "details": full_details}
+                            # On envoie list_source avec le nom de la liste choisie
+                            payload = {"name": str(name_val), "list_source": target_list_import}
                             
                             r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
                             if r.status_code == 200: 
@@ -374,5 +376,6 @@ if st.session_state["token"]:
             if st.button("Rafraîchir les logs"): st.rerun()
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
 
 
