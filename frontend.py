@@ -105,8 +105,12 @@ def get_alerts():
 def update_alert_api(alert_id, data):
     try:
         r = requests.patch(f"{API_URL}/alerts/{alert_id}", json=data)
-        return r.status_code == 200
-    except: return False
+        if r.status_code == 200:
+            return True, "OK"
+        else:
+            return False, f"Erreur {r.status_code} : {r.text}"
+    except Exception as e: 
+        return False, str(e)
 
 
 # --- FONCTIONS PDF ---
@@ -424,18 +428,20 @@ if st.session_state["token"]:
                     
                     new_comm = st.text_area("Commentaires / Justification", value=row['comments'] if row['comments'] else "")
 
-                    if st.form_submit_button("Enregistrer la décision"):
+                   if st.form_submit_button("Enregistrer la décision"):
                         payload = {
                             "status": new_status,
                             "decision": new_decision,
                             "comments": new_comm
                         }
-                        if update_alert_api(sel_id, payload):
+                        # NOUVEAU : On récupère le vrai message d'erreur
+                        success, message = update_alert_api(sel_id, payload)
+                        if success:
                             st.success("✅ Décision enregistrée avec succès !")
                             log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision}")
                             st.rerun()
                         else:
-                            st.error("❌ Erreur lors de la mise à jour.")
+                            st.error(f"❌ {message}") # Affiche la cause exacte !
 
             st.markdown("---")
             st.write("### 📋 Historique Complet des Alertes")
@@ -495,3 +501,4 @@ if st.session_state["token"]:
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
