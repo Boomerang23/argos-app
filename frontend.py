@@ -678,7 +678,7 @@ if st.session_state["token"]:
     # === API SaaS & INTEGRATIONS (NOUVEAU BLOC) ===
     elif menu == "🔌 API & Intégrations":
         st.subheader("🔌 Portail Développeur (API SaaS)")
-        st.write("Fournissez cette documentation à l'équipe technique de vos clients (Banques, SGI, Assurances). Elle leur permet d'intégrer le moteur IA d'ARGOS 360° directement dans leur site web ou application mobile.")
+        st.write("Documentation technique API. Automatisez votre conformité en connectant directement vos applications métiers à notre moteur de filtrage IA via ces endpoints sécurisés.")
         
         tabs = st.tabs(["🔑 Authentification", "📡 Endpoint KYC (Screening)", "💻 Scripts prêts à l'emploi"])
         
@@ -781,3 +781,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
