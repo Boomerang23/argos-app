@@ -112,6 +112,16 @@ def update_alert_api(alert_id, data):
         return False, str(e)
 
 # --- FONCTIONS PDF ---
+def clean_text_pdf(text):
+    """Nettoie les emojis pour éviter les carrés noirs dans le PDF de ReportLab"""
+    if pd.isna(text): return ""
+    text = str(text)
+    # Liste des emojis utilisés dans notre interface
+    emojis = ["🔴", "🟢", "🟠", "🟡", "⚠️", "🚨", "✅", "📝", "🛑", "📎", "👁️", "🔒", "🛠️", "📥", "🚀", "🔄"]
+    for e in emojis:
+        text = text.replace(e, "")
+    return text.strip()
+
 def create_kyc_pdf(client_name, client_id, status, risk_details):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -122,7 +132,7 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-    c.drawString(50, height - 210, f"Client : {client_name}"); c.drawString(50, height - 230, f"ID : {client_id}")
+    c.drawString(50, height - 210, f"Client : {clean_text_pdf(client_name)}"); c.drawString(50, height - 230, f"ID : {clean_text_pdf(client_id)}")
     
     if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
     else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
@@ -130,7 +140,7 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     c.setFillColor(color); c.setFont("Helvetica-Bold", 16); c.drawString(50, height - 280, f"STATUT : {text_status}")
     c.setFillColor(colors.black); c.setFont("Helvetica", 12)
     
-    lines = textwrap.wrap(f"Détail : {risk_details}", width=80) 
+    lines = textwrap.wrap(f"Détail : {clean_text_pdf(risk_details)}", width=80) 
     y_pos = height - 310
     for line in lines:
         c.drawString(50, y_pos, line); y_pos -= 20 
@@ -140,24 +150,51 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
 
 def create_global_report(dataframe):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30)
     elements = []
     styles = getSampleStyleSheet()
+    
     elements.append(Paragraph("<b>Rapport Global de Conformité</b>", styles['Title']))
     elements.append(Spacer(1, 12))
+    
     if 'Statut' in dataframe.columns:
         rejected = len(dataframe[dataframe['Statut'].str.contains("REJETÉ") | dataframe['Statut'].str.contains("ALERTE")])
     else: rejected = 0
     total = len(dataframe); compliant = total - rejected
+    
     stats_text = f"Date : {datetime.now().strftime('%d/%m/%Y')}<br/>Total : {total} | Conformes : {compliant} | <b>Alertes : {rejected}</b>"
-    elements.append(Paragraph(stats_text, styles['Normal'])); elements.append(Spacer(1, 20))
+    elements.append(Paragraph(stats_text, styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
     data = [["Nom du Client", "ID National", "Statut", "Détail"]]
-    for index, row in dataframe.iterrows(): data.append([str(row.get('Nom', '')), str(row.get('ID', '')), str(row.get('Statut', '')), str(row.get('Détail', ''))])
-    table = Table(data)
-    table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                               ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                               ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
-    elements.append(table); doc.build(elements); buffer.seek(0)
+    
+    for index, row in dataframe.iterrows(): 
+        nom = clean_text_pdf(row.get('Nom', ''))
+        id_nat = clean_text_pdf(row.get('ID', ''))
+        statut = clean_text_pdf(row.get('Statut', ''))
+        detail_text = clean_text_pdf(row.get('Détail', ''))
+        
+        detail_paragraph = Paragraph(detail_text, styles['Normal'])
+        
+        data.append([nom, id_nat, statut, detail_paragraph])
+        
+    table = Table(data, colWidths=[120, 80, 100, 250])
+    
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), 
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'), 
+        ('ALIGN', (0, 1), (-1, -1), 'LEFT'),  
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),  
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12), 
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige), 
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
     return buffer
 
 def create_investigation_pdf(row_data):
@@ -174,18 +211,18 @@ def create_investigation_pdf(row_data):
     
     c.setFont("Helvetica-Bold", 12); c.drawString(50, height - 160, "1. Détails de la Détection")
     c.setFont("Helvetica", 11)
-    c.drawString(60, height - 180, f"Date de création : {row_data.get('created_at_str', row_data.get('created_at', 'N/A'))}")
-    c.drawString(60, height - 200, f"Client Scanné : {row_data.get('client_name', 'N/A')}")
-    c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {row_data.get('matched_name', 'N/A')}")
+    c.drawString(60, height - 180, f"Date de création : {clean_text_pdf(row_data.get('created_at_str', row_data.get('created_at', 'N/A')))}")
+    c.drawString(60, height - 200, f"Client Scanné : {clean_text_pdf(row_data.get('client_name', 'N/A'))}")
+    c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {clean_text_pdf(row_data.get('matched_name', 'N/A'))}")
     c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
-    c.drawString(60, height - 260, f"Délai (SLA) : {row_data.get('SLA', 'N/A')}")
+    c.drawString(60, height - 260, f"Délai (SLA) : {clean_text_pdf(row_data.get('SLA', 'N/A'))}")
     
     c.setFont("Helvetica-Bold", 12); c.drawString(50, height - 300, "2. Décision de Conformité et Traitement")
     c.setFont("Helvetica", 11)
     
-    statut = row_data.get('status', 'OUVERT')
-    decision = row_data.get('decision', 'EN_ATTENTE')
-    if pd.isna(decision) or not decision: decision = "EN_ATTENTE"
+    statut = clean_text_pdf(row_data.get('status', 'OUVERT'))
+    decision = clean_text_pdf(row_data.get('decision', 'EN_ATTENTE'))
+    if pd.isna(decision) or str(decision) in ["None", "", "nan"]: decision = "EN_ATTENTE"
     
     if decision == "CONFIRME": color = colors.red
     elif decision == "FAUX_POSITIF": color = colors.green
@@ -198,9 +235,9 @@ def create_investigation_pdf(row_data):
     c.drawString(60, height - 370, "Commentaires de l'analyste / Justification :")
     
     comments = row_data.get('comments', 'Aucun commentaire.')
-    if pd.isna(comments) or comments in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
+    if pd.isna(comments) or str(comments) in ["None", "", "nan"]: comments = "Aucun commentaire n'a été saisi pour justifier cette décision."
     
-    lines = textwrap.wrap(str(comments), width=80) 
+    lines = textwrap.wrap(clean_text_pdf(str(comments)), width=80) 
     y_pos = height - 390
     for line in lines:
         c.drawString(70, y_pos, line); y_pos -= 20 
@@ -256,7 +293,6 @@ if st.session_state["token"]:
     
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
     if st.session_state["role"] == "ADMIN": 
-        # AJOUT DE L'ONGLET API POUR LES ADMINS
         menu_options.extend(["👥 Utilisateurs", "🔌 API & Intégrations"]) 
         
     menu = st.sidebar.radio("Menu", menu_options)
@@ -675,10 +711,10 @@ if st.session_state["token"]:
                         st.rerun()
                     else: st.error("Erreur")
 
-    # === API SaaS & INTEGRATIONS (NOUVEAU BLOC) ===
+    # === API SaaS & INTEGRATIONS (AVEC LE TEXTE CORRIGÉ) ===
     elif menu == "🔌 API & Intégrations":
         st.subheader("🔌 Portail Développeur (API SaaS)")
-        st.write("Documentation technique API. Automatisez votre conformité en connectant directement vos applications métiers à notre moteur de filtrage IA via ces endpoints sécurisés.")
+        st.write("Espace dédié aux équipes techniques. Cette documentation vous permet d'intégrer automatiquement les capacités de screening d'ARGOS 360° directement dans vos systèmes d'information (Core Banking, portails d'Onboarding, applications mobiles).")
         
         tabs = st.tabs(["🔑 Authentification", "📡 Endpoint KYC (Screening)", "💻 Scripts prêts à l'emploi"])
         
@@ -781,4 +817,3 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
