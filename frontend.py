@@ -255,11 +255,13 @@ if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
-    if st.session_state["role"] == "ADMIN": menu_options.append("👥 Utilisateurs") 
+    if st.session_state["role"] == "ADMIN": 
+        # AJOUT DE L'ONGLET API POUR LES ADMINS
+        menu_options.extend(["👥 Utilisateurs", "🔌 API & Intégrations"]) 
         
     menu = st.sidebar.radio("Menu", menu_options)
 
-    # === TABLEAU DE BORD (REPORTING DYNAMIQUE) ===
+    # === TABLEAU DE BORD ===
     if menu == "📊 Tableau de Bord":
         st.subheader("📊 Reporting Dynamique & Statistiques")
         df = load_stats()
@@ -319,9 +321,8 @@ if st.session_state["token"]:
         else:
             st.info("Aucune donnée disponible. Lancez un scan pour alimenter les statistiques !")
 
-    # === VÉRIFICATIONS (AVEC LE NOUVEAU BATCH SCREENING) ===
+    # === VÉRIFICATIONS ===
     elif menu == "🔍 Vérifications":
-        # ICI ON AJOUTE LE 3EME ONGLET t3
         t1, t2, t3 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)", "🔄 Filtrage Continu (Batch)"])
         
         with t1:
@@ -383,7 +384,6 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-        # NOUVEAU BLOC : LE FILTRAGE CONTINU EN MASSE (BATCH SCREENING)
         with t3:
             st.write("### 🔄 Filtrage Continu (Ongoing Screening)")
             st.info("💡 **Conformité Réglementaire :** Cette fonction récupère la liste de tous vos clients existants et les repasse au crible des dernières listes de sanctions. C'est indispensable pour détecter si un ancien client est devenu une personne à risque hier !")
@@ -393,7 +393,6 @@ if st.session_state["token"]:
                 if df_history.empty:
                     st.warning("Aucun client dans la base de données historique.")
                 else:
-                    # Récupération des clients uniques de la base
                     unique_clients = df_history['client_name'].dropna().unique()
                     st.write(f"🔄 **Lancement de l'analyse en arrière-plan sur {len(unique_clients)} clients uniques...**")
                     
@@ -402,15 +401,12 @@ if st.session_state["token"]:
                     
                     for i, client_name in enumerate(unique_clients):
                         try:
-                            # On re-teste chaque client contre l'API de vérification
                             r = requests.post(f"{API_URL}/clients/", json={"full_name": str(client_name), "entity_type": "P", "national_id": "BATCH", "country_residence": "CI", "tenant_id": "BATCH"}, headers=headers)
                             if r.status_code == 200:
                                 d = r.json()
                                 rk = d.get("risk_score", "Low")
                                 stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
                                 res_batch.append({"Nom Client": client_name, "Statut Actuel": stt, "Détail / Motif": d.get("details", "")})
-                                
-                                # On sauvegarde le nouveau statut dans l'historique
                                 save_scan(str(client_name), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Filtrage Continu (Batch)")
                             else:
                                 res_batch.append({"Nom Client": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": f"Code {r.status_code}"})
@@ -495,7 +491,6 @@ if st.session_state["token"]:
                         st.markdown(f"**Votre Rôle Actuel :** `{user_role}`")
                         new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
                         
-                        # --- WORKFLOW 1 : L'ADMIN VALIDE ---
                         if current_stat == "A_VALIDER" and user_role == "ADMIN":
                             st.warning("👁️ Action requise : Validez ou rejetez la proposition de l'Agent.")
                             st.text_area("Historique du dossier :", value=str(current_comm), disabled=True)
@@ -514,13 +509,11 @@ if st.session_state["token"]:
                                     time.sleep(1.5); st.rerun()
                                 else: st.error(f"❌ {message}")
                                 
-                        # --- WORKFLOW 2 : L'AGENT EST BLOQUÉ EN ATTENTE ---
                         elif current_stat == "A_VALIDER" and user_role == "AGENT":
                             st.info("⏳ Ce dossier a été soumis et est en attente de validation par un Superviseur.")
                             st.text_area("Vos commentaires :", value=str(current_comm), disabled=True)
                             st.form_submit_button("🔒 Dossier verrouillé", disabled=True)
                             
-                        # --- WORKFLOW 3 : PROPOSER UNE DÉCISION ---
                         else:
                             st.write("🛠️ **Proposer une action**")
                             
@@ -681,6 +674,110 @@ if st.session_state["token"]:
                         time.sleep(1.5)
                         st.rerun()
                     else: st.error("Erreur")
+
+    # === API SaaS & INTEGRATIONS (NOUVEAU BLOC) ===
+    elif menu == "🔌 API & Intégrations":
+        st.subheader("🔌 Portail Développeur (API SaaS)")
+        st.write("Fournissez cette documentation à l'équipe technique de vos clients (Banques, SGI, Assurances). Elle leur permet d'intégrer le moteur IA d'ARGOS 360° directement dans leur site web ou application mobile.")
+        
+        tabs = st.tabs(["🔑 Authentification", "📡 Endpoint KYC (Screening)", "💻 Scripts prêts à l'emploi"])
+        
+        with tabs[0]:
+            st.markdown("### 1. Obtenir un Jeton d'Accès Sécurisé (JWT)")
+            st.write("L'API d'ARGOS utilise le standard OAuth2. Le système partenaire doit d'abord obtenir un token dynamique en envoyant ses identifiants.")
+            st.code(f"POST {API_URL}/token\nContent-Type: application/x-www-form-urlencoded\n\nusername=admin@sgi.ci\npassword=votre_mot_de_passe", language="http")
+            
+        with tabs[1]:
+            st.markdown("### 2. Lancer un Scan Automatique via l'API")
+            st.write("Une fois le token obtenu, le système partenaire peut envoyer les données d'un client de manière invisible pour recevoir instantanément la décision de conformité.")
+            st.markdown(f"**Méthode et URL :** `POST {API_URL}/clients/`")
+            st.markdown("**Headers requis :** `Authorization: Bearer VOTRE_TOKEN_ICI`")
+            st.markdown("**Corps de la requête (Body JSON) :**")
+            st.json({
+                "full_name": "Pablo Escobar",
+                "national_id": "CI-987654",
+                "entity_type": "Physique",
+                "country_residence": "CI",
+                "tenant_id": "API_EXTERNE_BANQUE_X"
+            })
+            st.markdown("**Réponse du Serveur ARGOS (JSON) :**")
+            st.json({
+                "client_name": "Pablo Escobar",
+                "risk_score": "ELEVE",
+                "similarity_score": 95.5,
+                "details": "🚨 ALERTE : Correspondance trouvée dans Listes Internationales"
+            })
+            
+        with tabs[2]:
+            st.markdown("### 💻 Exemples de Code pour les développeurs")
+            st.write("Le développeur de la banque peut copier-coller ces extraits directement dans son propre logiciel.")
+            
+            lang = st.selectbox("Choisir le langage de programmation", ["Python (Requests)", "cURL (Terminal Linux)", "JavaScript (Node.js)"])
+            
+            if lang == "Python (Requests)":
+                st.code(f"""import requests
+
+# 1. Connexion à ARGOS et récupération du Token
+auth_response = requests.post(
+    "{API_URL}/token", 
+    data={{"username": "admin@sgi.ci", "password": "MOT_DE_PASSE"}}
+)
+token = auth_response.json()["access_token"]
+
+# 2. Requête de vérification du nouveau client de la banque
+headers = {{"Authorization": f"Bearer {{token}}"}}
+payload = {{
+    "full_name": "Jean Dupont", 
+    "entity_type": "P", 
+    "national_id": "123", 
+    "country_residence": "CI", 
+    "tenant_id": "WEBSITE"
+}}
+
+scan_response = requests.post("{API_URL}/clients/", json=payload, headers=headers)
+
+# 3. Lecture du résultat IA
+print(scan_response.json())
+""", language="python")
+
+            elif lang == "cURL (Terminal Linux)":
+                st.code(f"""# 1. Obtenir le token
+curl -X POST "{API_URL}/token" -d "username=admin@sgi.ci&password=MOT_DE_PASSE"
+
+# 2. Lancer le Scan (Remplacer VOTRE_TOKEN_ICI par le vrai token)
+curl -X POST "{API_URL}/clients/" \\
+     -H "Authorization: Bearer VOTRE_TOKEN_ICI" \\
+     -H "Content-Type: application/json" \\
+     -d '{{"full_name": "Jean Dupont", "entity_type": "P", "national_id": "123", "country_residence": "CI", "tenant_id": "WEBSITE"}}'
+""", language="bash")
+
+            elif lang == "JavaScript (Node.js)":
+                st.code(f"""const axios = require('axios');
+
+async function validerClientArgos() {{
+  // 1. Obtenir le Token
+  const params = new URLSearchParams({{ username: 'admin@sgi.ci', password: 'MOT_DE_PASSE' }});
+  const authRes = await axios.post('{API_URL}/token', params);
+  const token = authRes.data.access_token;
+
+  // 2. Lancer le Scan
+  const clientData = {{
+    full_name: "Jean Dupont",
+    entity_type: "P",
+    national_id: "123",
+    country_residence: "CI",
+    tenant_id: "WEBSITE"
+  }};
+  
+  const scanRes = await axios.post('{API_URL}/clients/', clientData, {{
+    headers: {{ Authorization: `Bearer ${{token}}` }}
+  }});
+
+  console.log(scanRes.data);
+}}
+
+validerClientArgos();
+""", language="javascript")
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
