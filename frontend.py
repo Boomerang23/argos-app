@@ -259,19 +259,68 @@ if st.session_state["token"]:
         
     menu = st.sidebar.radio("Menu", menu_options)
 
-    # === TABLEAU DE BORD ===
+    # === TABLEAU DE BORD (NOUVEAU REPORTING DYNAMIQUE) ===
     if menu == "📊 Tableau de Bord":
-        st.subheader("Vue d'ensemble")
+        st.subheader("📊 Reporting Dynamique & Statistiques")
         df = load_stats()
+        
         if not df.empty:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Vérifications Totales", len(df))
-            c2.metric("✅ Conformes", len(df) - len(df[df['status'].str.contains('ALERTE')]))
-            c3.metric("🚨 Alertes", len(df[df['status'].str.contains('ALERTE')]))
+            # Sécurisation du format de date pour le filtrage
+            df['date'] = pd.to_datetime(df['date'])
             
-            g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(px.pie(df, names='status', title='Ratio Conformité', color_discrete_sequence=['green', 'red']), use_container_width=True)
-            with g2: st.plotly_chart(px.bar(df, x='date', title='Volume Quotidien'), use_container_width=True)
+            st.write("### 📅 Filtres de période (Extraction Réglementaire)")
+            col_d1, col_d2 = st.columns(2)
+            min_date = df['date'].min().date()
+            max_date = df['date'].max().date()
+            
+            with col_d1: start_date = st.date_input("Date de début", min_date)
+            with col_d2: end_date = st.date_input("Date de fin", max_date)
+            
+            # Application du filtre temporel
+            mask = (df['date'].dt.date >= start_date) & (df['date'].dt.date <= end_date)
+            df_filtered = df.loc[mask]
+            
+            if df_filtered.empty:
+                st.warning("⚠️ Aucune donnée disponible pour cette période sélectionnée.")
+            else:
+                st.write("### 📈 Indicateurs Clés de Performance (KPI)")
+                c1, c2, c3 = st.columns(3)
+                total_scans = len(df_filtered)
+                alertes = len(df_filtered[df_filtered['status'].str.contains('ALERTE')])
+                conformes = total_scans - alertes
+                
+                c1.metric("Vérifications Totales", total_scans)
+                c2.metric("✅ Dossiers Conformes", conformes)
+                c3.metric("🚨 Alertes Détectées", alertes)
+                
+                g1, g2 = st.columns(2)
+                with g1: 
+                    # Camembert professionnel avec couleurs fixes
+                    fig_pie = px.pie(df_filtered, names='status', title='Ratio de Conformité', color='status', color_discrete_map={'CONFORME':'#28a745', 'ALERTE':'#dc3545'})
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                    
+                with g2: 
+                    # Nouvelle courbe d'évolution temporelle
+                    daily_counts = df_filtered.groupby([df_filtered['date'].dt.date, 'status']).size().reset_index(name='count')
+                    fig_line = px.line(daily_counts, x='date', y='count', color='status', title='Évolution des Scans Quotidiens', markers=True, color_discrete_map={'CONFORME':'#28a745', 'ALERTE':'#dc3545'})
+                    st.plotly_chart(fig_line, use_container_width=True)
+                    
+                # NOUVEAU BOUTON D'EXPORT POUR LE DIRECTEUR
+                st.markdown("---")
+                st.write("### 📥 Exporter le Reporting")
+                st.info("Générez un registre des vérifications KYC de cette période pour répondre aux exigences de la CENTIF ou de la Commission Bancaire.")
+                
+                export_df = df_filtered.copy()
+                export_df['date'] = export_df['date'].dt.strftime('%Y-%m-%d') # Remise au format texte propre
+                csv_data = export_df.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="⬇️ Télécharger le Registre Filtré (CSV)",
+                    data=csv_data,
+                    file_name=f"Rapport_ARGOS_du_{start_date}_au_{end_date}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
         else:
             st.info("Aucune donnée disponible. Lancez un scan pour alimenter les statistiques !")
 
@@ -338,7 +387,7 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-    # === CENTRE D'ALERTES (NOUVEAU WORKFLOW MAKER/CHECKER EPURÉ) ===
+    # === CENTRE D'ALERTES ===
     elif menu == "🚦 Alertes":
         st.subheader("🚦 Centre de Traitement des Alertes")
         df_a = get_alerts()
@@ -360,7 +409,6 @@ if st.session_state["token"]:
             if 'created_at' in df_a.columns: df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
             st.write("### 🗂️ Filtres rapides")
-            # Ajout du filtre "A_VALIDER"
             filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "A_VALIDER", "FERME"], horizontal=True)
             df_filtered = df_a.copy() if filter_stat == "Toutes" else df_a[df_a['status'] == filter_stat].copy()
             
@@ -437,7 +485,6 @@ if st.session_state["token"]:
                         else:
                             st.write("🛠️ **Proposer une action**")
                             
-                            # BRIDAGE : Un AGENT ne peut plus fermer un dossier tout seul !
                             if user_role == "ADMIN": list_status = ["OUVERT", "EN_COURS", "A_VALIDER", "FERME"]
                             else: list_status = ["OUVERT", "EN_COURS", "A_VALIDER"]
                                 
@@ -451,7 +498,6 @@ if st.session_state["token"]:
                                 final_comm = new_comm
                                 if uploaded_file: final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
                                 
-                                # Si l'agent envoie en validation, on signe son acte
                                 if new_status == "A_VALIDER":
                                     final_comm += f"\n\n📝 [AGENT - {st.session_state['user_email']}] Dossier soumis pour validation."
 
@@ -498,17 +544,14 @@ if st.session_state["token"]:
                     else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
         with tabs[1]:
-            # EXIGENCE SP-LS-07 : GESTION MULTI-FORMATS (CSV, EXCEL, JSON, XML)
             st.info("Mettre à jour une liste via import multi-formats (CSV, Excel, JSON, XML).")
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
             
             with st.form("import_form", clear_on_submit=True):
-                # Ajout des formats json et xml
                 upl_file = st.file_uploader("Fichier de données", type=["csv", "xlsx", "json", "xml"])
                 submit_imp = st.form_submit_button("Importer les données 📥")
                 if submit_imp and upl_file:
                     try:
-                        # Moteur de lecture intelligent selon l'extension du fichier
                         if upl_file.name.endswith('.csv'): df = pd.read_csv(upl_file)
                         elif upl_file.name.endswith('.xlsx'): df = pd.read_excel(upl_file)
                         elif upl_file.name.endswith('.json'): df = pd.read_json(upl_file)
@@ -520,7 +563,6 @@ if st.session_state["token"]:
                         last_error = "" 
                         
                         for i, row in df.iterrows():
-                            # Recherche du nom dans différentes colonnes possibles selon le fichier
                             name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
                             if name_val != "Inconnu":
                                 payload = {"name": str(name_val), "list_source": target_list_import}
@@ -539,17 +581,14 @@ if st.session_state["token"]:
                     except Exception as e: st.error(f"Erreur technique de lecture du fichier : {e}")
 
         with tabs[2]:
-            # EXIGENCE SP-LS-04 : CRITICITÉ DES LISTES
             st.write("Définir une nouvelle catégorie de liste et son niveau de risque.")
             with st.form("create_list_form", clear_on_submit=True):
                 new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
-                # Nouveau champ : Niveau de criticité
                 criticite = st.selectbox("Niveau de Criticité", ["🔴 Bloquant (Rejet Automatique)", "🟠 Renforcé (Investigation Requise)", "🟡 Standard (Alerte Simple)"])
                 
                 if st.form_submit_button("Créer la Liste"):
                     if new_list_name:
-                        # On fusionne le nom et la criticité pour le visuel et la base de données
-                        mot_cle_criticite = criticite.split(" ")[1] # Récupère "Bloquant", "Renforcé" ou "Standard"
+                        mot_cle_criticite = criticite.split(" ")[1]
                         nom_final = f"{new_list_name} [{mot_cle_criticite}]"
                         
                         if nom_final in get_all_lists(): st.warning("Cette liste existe déjà.")
