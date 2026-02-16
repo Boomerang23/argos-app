@@ -427,7 +427,7 @@ if st.session_state["token"]:
             columns_to_show = ['id', 'SLA', 'Priorité', 'client_name', 'status', 'assigned_to', 'created_at_str']
             st.dataframe(df_filtered[columns_to_show], use_container_width=True)
 
-    # === GESTION DES LISTES ===
+   # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes")
         tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
@@ -450,52 +450,72 @@ if st.session_state["token"]:
                             if r.status_code == 200:
                                 st.success(f"✅ '{bad_name}' ajouté à '{target_list}' avec succès.")
                                 log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
-                            else: st.error("Erreur serveur ou format incorrect.")
-                        except Exception as e: st.error(f"Erreur: {e}")
+                            else:
+                                st.error(f"❌ Erreur du serveur (Code {r.status_code}) : {r.text}")
+                        except Exception as e:
+                            st.error(f"❌ Impossible de joindre le serveur : {e}")
                     else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
         with tabs[1]:
-            st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
+            # EXIGENCE SP-LS-07 : GESTION MULTI-FORMATS (CSV, EXCEL, JSON, XML)
+            st.info("Mettre à jour une liste via import multi-formats (CSV, Excel, JSON, XML).")
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
             
             with st.form("import_form", clear_on_submit=True):
-                upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
+                # Ajout des formats json et xml
+                upl_file = st.file_uploader("Fichier de données", type=["csv", "xlsx", "json", "xml"])
                 submit_imp = st.form_submit_button("Importer les données 📥")
                 if submit_imp and upl_file:
                     try:
-                        df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
+                        # Moteur de lecture intelligent selon l'extension du fichier
+                        if upl_file.name.endswith('.csv'): df = pd.read_csv(upl_file)
+                        elif upl_file.name.endswith('.xlsx'): df = pd.read_excel(upl_file)
+                        elif upl_file.name.endswith('.json'): df = pd.read_json(upl_file)
+                        elif upl_file.name.endswith('.xml'): df = pd.read_xml(upl_file)
+                        
                         st.write(f"Aperçu ({len(df)} entrées) :")
                         st.dataframe(df.head(3))
                         progress = st.progress(0); count_ok = 0
-                        last_error = ""
+                        last_error = "" 
                         
                         for i, row in df.iterrows():
+                            # Recherche du nom dans différentes colonnes possibles selon le fichier
                             name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
                             if name_val != "Inconnu":
                                 payload = {"name": str(name_val), "list_source": target_list_import}
                                 r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                                if r.status_code == 200: count_ok += 1
-                                else: last_error = r.text
+                                if r.status_code == 200: 
+                                    count_ok += 1
+                                else: 
+                                    last_error = f"Code {r.status_code}: {r.text}"
                             progress.progress((i+1)/len(df))
                         
                         if count_ok > 0:
                             st.success(f"✅ Import terminé ! {count_ok} entrées ont bien été ajoutées à '{target_list_import}'.")
                             log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
                         else: 
-                            st.error(f"❌ Aucune entrée ajoutée. Raison probable (Doublons ou format) : {last_error}")
-                    except Exception as e: st.error(f"Erreur de lecture : {e}")
+                            st.error(f"❌ L'import a échoué. Détail technique : {last_error}")
+                    except Exception as e: st.error(f"Erreur technique de lecture du fichier : {e}")
 
         with tabs[2]:
-            st.write("Définir une nouvelle catégorie de liste.")
+            # EXIGENCE SP-LS-04 : CRITICITÉ DES LISTES
+            st.write("Définir une nouvelle catégorie de liste et son niveau de risque.")
             with st.form("create_list_form", clear_on_submit=True):
                 new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
+                # Nouveau champ : Niveau de criticité
+                criticite = st.selectbox("Niveau de Criticité", ["🔴 Bloquant (Rejet Automatique)", "🟠 Renforcé (Investigation Requise)", "🟡 Standard (Alerte Simple)"])
+                
                 if st.form_submit_button("Créer la Liste"):
                     if new_list_name:
-                        if new_list_name in get_all_lists(): st.warning("Cette liste existe déjà.")
+                        # On fusionne le nom et la criticité pour le visuel et la base de données
+                        mot_cle_criticite = criticite.split(" ")[1] # Récupère "Bloquant", "Renforcé" ou "Standard"
+                        nom_final = f"{new_list_name} [{mot_cle_criticite}]"
+                        
+                        if nom_final in get_all_lists(): st.warning("Cette liste existe déjà.")
                         else:
-                            if add_custom_list(new_list_name):
-                                st.success(f"Liste '{new_list_name}' créée !")
-                                log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
+                            if add_custom_list(nom_final):
+                                st.success(f"Liste '{nom_final}' créée avec succès !")
+                                log_action(st.session_state["user_email"], "CREATION_LISTE", nom_final, f"Criticité: {mot_cle_criticite}")
                                 time.sleep(1.5)
                                 st.rerun()
                             else: st.error("Erreur serveur.")
@@ -522,7 +542,7 @@ if st.session_state["token"]:
             if not df_logs.empty and 'id' in df_logs.columns: df_logs = df_logs.drop(columns=['id']) 
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
-
+                
     # === UTILISATEURS ===
     elif menu == "👥 Utilisateurs":
         st.subheader("👥 Gestion de l'Équipe")
@@ -545,3 +565,4 @@ if st.session_state["token"]:
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
