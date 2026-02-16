@@ -338,9 +338,9 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-    # === CENTRE D'ALERTES (NOUVEAU WORKFLOW MAKER/CHECKER) ===
+    # === CENTRE D'ALERTES (NOUVEAU WORKFLOW MAKER/CHECKER EPURÉ) ===
     elif menu == "🚦 Alertes":
-        st.subheader("🚦 Centre de Traitement (Principe des 4 Yeux)")
+        st.subheader("🚦 Centre de Traitement des Alertes")
         df_a = get_alerts()
         
         if df_a.empty: st.info("RAS : Aucune alerte en attente de traitement.")
@@ -391,7 +391,7 @@ if st.session_state["token"]:
                     st.download_button(label="📄 Télécharger le Rapport d'Investigation", data=investigation_pdf, file_name=f"rapport_investigation_alerte_{sel_id}.pdf", mime="application/pdf", type="secondary")
 
                 with col_form:
-                    st.markdown("### ✍️ Décision & Preuves (Maker / Checker)")
+                    st.markdown("### ✍️ Décision & Preuves")
                     users_df = get_users()
                     agent_list = ["Non assigné"]
                     if not users_df.empty: agent_list += users_df['email'].tolist()
@@ -408,9 +408,9 @@ if st.session_state["token"]:
                         st.markdown(f"**Votre Rôle Actuel :** `{user_role}`")
                         new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
                         
-                        # --- WORKFLOW 1 : CHECKER (L'ADMIN VALIDE) ---
+                        # --- WORKFLOW 1 : L'ADMIN VALIDE ---
                         if current_stat == "A_VALIDER" and user_role == "ADMIN":
-                            st.warning("👁️ Action requise (Checker) : Validez ou rejetez la proposition de l'Agent.")
+                            st.warning("👁️ Action requise : Validez ou rejetez la proposition de l'Agent.")
                             st.text_area("Historique du dossier :", value=str(current_comm), disabled=True)
                             
                             action_checker = st.radio("Décision de supervision :", ["✅ Approuver (Fermer le dossier)", "❌ Rejeter (Retour à l'Agent)"])
@@ -418,7 +418,7 @@ if st.session_state["token"]:
                             
                             if st.form_submit_button("Valider la Supervision"):
                                 final_status = "FERME" if "Approuver" in action_checker else "EN_COURS"
-                                final_comm = current_comm + f"\n\n🛑 [CHECKER - {st.session_state['user_email']}] {action_checker} : {checker_comm}"
+                                final_comm = current_comm + f"\n\n🛑 [SUPERVISION - {st.session_state['user_email']}] {action_checker} : {checker_comm}"
                                 payload = {"status": final_status, "decision": current_dec, "comments": final_comm, "assigned_to": new_assignee}
                                 success, message = update_alert_api(sel_id, payload)
                                 if success:
@@ -427,15 +427,15 @@ if st.session_state["token"]:
                                     time.sleep(1.5); st.rerun()
                                 else: st.error(f"❌ {message}")
                                 
-                        # --- WORKFLOW 2 : MAKER (L'AGENT EST BLOQUÉ EN ATTENTE) ---
+                        # --- WORKFLOW 2 : L'AGENT EST BLOQUÉ EN ATTENTE ---
                         elif current_stat == "A_VALIDER" and user_role == "AGENT":
-                            st.info("⏳ Ce dossier a été soumis et est en attente de validation par un Superviseur (Principe des 4 Yeux).")
+                            st.info("⏳ Ce dossier a été soumis et est en attente de validation par un Superviseur.")
                             st.text_area("Vos commentaires :", value=str(current_comm), disabled=True)
                             st.form_submit_button("🔒 Dossier verrouillé", disabled=True)
                             
-                        # --- WORKFLOW 3 : MAKER (L'AGENT OU L'ADMIN PROPOSE UNE DÉCISION) ---
+                        # --- WORKFLOW 3 : PROPOSER UNE DÉCISION ---
                         else:
-                            st.write("🛠️ **Proposer une action (Maker)**")
+                            st.write("🛠️ **Proposer une action**")
                             
                             # BRIDAGE : Un AGENT ne peut plus fermer un dossier tout seul !
                             if user_role == "ADMIN": list_status = ["OUVERT", "EN_COURS", "A_VALIDER", "FERME"]
@@ -451,20 +451,20 @@ if st.session_state["token"]:
                                 final_comm = new_comm
                                 if uploaded_file: final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
                                 
-                                # Si le Maker envoie en validation, on signe son acte
+                                # Si l'agent envoie en validation, on signe son acte
                                 if new_status == "A_VALIDER":
-                                    final_comm += f"\n\n📝 [MAKER - {st.session_state['user_email']}] Dossier soumis pour validation."
+                                    final_comm += f"\n\n📝 [AGENT - {st.session_state['user_email']}] Dossier soumis pour validation."
 
                                 payload = {"status": new_status, "decision": new_decision, "comments": final_comm, "assigned_to": new_assignee}
                                 success, message = update_alert_api(sel_id, payload)
                                 if success:
                                     st.success("✅ Action enregistrée !")
-                                    log_action(st.session_state["user_email"], "TRAITEMENT_MAKER", str(sel_id), f"Statut: {new_status}")
+                                    log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Statut: {new_status}")
                                     time.sleep(1.5); st.rerun()
                                 else: st.error(f"❌ {message}")
 
             st.markdown("---")
-            st.write("### 📋 Historique Complet (Filtré)")
+            st.write("### 📋 Historique Complet")
             columns_to_show = ['id', 'SLA', 'Priorité', 'client_name', 'status', 'assigned_to', 'created_at_str']
             st.dataframe(df_filtered[columns_to_show], use_container_width=True)
 
