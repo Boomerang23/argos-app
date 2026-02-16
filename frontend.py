@@ -3,6 +3,7 @@ import textwrap
 import requests
 import pandas as pd
 import io
+import time # <-- NOUVEAU : Pour les pauses d'affichage
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
@@ -25,7 +26,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTION DE LA BASE DE DONNÉES CLOUD (Via API Render) ---
+# --- GESTION DE LA BASE DE DONNÉES CLOUD ---
 def log_action(user, action, target, details):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = {"timestamp": now, "user_email": user, "action": action, "target": target, "details": details}
@@ -76,7 +77,6 @@ def load_stats():
     except: pass
     return pd.DataFrame(columns=["date", "client_name", "status", "details"])
 
-# --- GESTION DES UTILISATEURS ---
 def get_users():
     try:
         r = requests.get(f"{API_URL}/users/")
@@ -93,7 +93,6 @@ def create_user(email, password, full_name, role):
     except Exception as e:
         return False, str(e)
 
-# --- GESTION DES ALERTES (TICKETS) ---
 def get_alerts():
     try:
         r = requests.get(f"{API_URL}/alerts/")
@@ -117,36 +116,26 @@ def create_kyc_pdf(client_name, client_id, status, risk_details):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(50, height - 50, "ARGOS")
-    c.setFont("Helvetica", 12)
-    c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
-    c.setLineWidth(2)
-    c.line(50, height - 80, width - 50, height - 80)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
+    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS")
+    c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
+    c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
+    c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-    c.drawString(50, height - 210, f"Client : {client_name}")
-    c.drawString(50, height - 230, f"ID : {client_id}")
+    c.drawString(50, height - 210, f"Client : {client_name}"); c.drawString(50, height - 230, f"ID : {client_id}")
     
     if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
     else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
     
-    c.setFillColor(color)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 280, f"STATUT : {text_status}")
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 12)
+    c.setFillColor(color); c.setFont("Helvetica-Bold", 16); c.drawString(50, height - 280, f"STATUT : {text_status}")
+    c.setFillColor(colors.black); c.setFont("Helvetica", 12)
     
     lines = textwrap.wrap(f"Détail : {risk_details}", width=80) 
     y_pos = height - 310
     for line in lines:
-        c.drawString(50, y_pos, line)
-        y_pos -= 20 
+        c.drawString(50, y_pos, line); y_pos -= 20 
         
-    c.save()
-    buffer.seek(0)
+    c.save(); buffer.seek(0)
     return buffer
 
 def create_global_report(dataframe):
@@ -161,17 +150,14 @@ def create_global_report(dataframe):
     else: rejected = 0
     total = len(dataframe); compliant = total - rejected
     stats_text = f"Date : {datetime.now().strftime('%d/%m/%Y')}<br/>Total : {total} | Conformes : {compliant} | <b>Alertes : {rejected}</b>"
-    elements.append(Paragraph(stats_text, styles['Normal']))
-    elements.append(Spacer(1, 20))
+    elements.append(Paragraph(stats_text, styles['Normal'])); elements.append(Spacer(1, 20))
     data = [["Nom du Client", "ID National", "Statut", "Détail"]]
     for index, row in dataframe.iterrows(): data.append([str(row.get('Nom', '')), str(row.get('ID', '')), str(row.get('Statut', '')), str(row.get('Détail', ''))])
     table = Table(data)
     table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                                ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
-    elements.append(table)
-    doc.build(elements)
-    buffer.seek(0)
+    elements.append(table); doc.build(elements); buffer.seek(0)
     return buffer
 
 def create_investigation_pdf(row_data):
@@ -179,18 +165,14 @@ def create_investigation_pdf(row_data):
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
     
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(50, height - 50, "ARGOS 360°")
-    c.setFont("Helvetica", 12)
-    c.drawString(50, height - 70, "Rapport Officiel d'Investigation AML/KYC")
-    c.setLineWidth(2)
-    c.line(50, height - 80, width - 50, height - 80)
+    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360°")
+    c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Rapport Officiel d'Investigation AML/KYC")
+    c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
     
     c.setFont("Helvetica-Bold", 16)
     c.drawCentredString(width / 2, height - 120, f"DOSSIER D'ALERTE #{row_data.get('id', 'N/A')}")
     
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, height - 160, "1. Détails de la Détection")
+    c.setFont("Helvetica-Bold", 12); c.drawString(50, height - 160, "1. Détails de la Détection")
     c.setFont("Helvetica", 11)
     c.drawString(60, height - 180, f"Date de création : {row_data.get('created_at_str', row_data.get('created_at', 'N/A'))}")
     c.drawString(60, height - 200, f"Client Scanné : {row_data.get('client_name', 'N/A')}")
@@ -198,8 +180,7 @@ def create_investigation_pdf(row_data):
     c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
     c.drawString(60, height - 260, f"Délai (SLA) : {row_data.get('SLA', 'N/A')}")
     
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, height - 300, "2. Décision de Conformité et Traitement")
+    c.setFont("Helvetica-Bold", 12); c.drawString(50, height - 300, "2. Décision de Conformité et Traitement")
     c.setFont("Helvetica", 11)
     
     statut = row_data.get('status', 'OUVERT')
@@ -211,8 +192,7 @@ def create_investigation_pdf(row_data):
     else: color = colors.orange
     
     c.drawString(60, height - 320, f"Statut actuel du dossier : {statut}")
-    c.setFillColor(color)
-    c.drawString(60, height - 340, f"Décision finale : {decision}")
+    c.setFillColor(color); c.drawString(60, height - 340, f"Décision finale : {decision}")
     c.setFillColor(colors.black)
     
     c.drawString(60, height - 370, "Commentaires de l'analyste / Justification :")
@@ -223,14 +203,12 @@ def create_investigation_pdf(row_data):
     lines = textwrap.wrap(str(comments), width=80) 
     y_pos = height - 390
     for line in lines:
-        c.drawString(70, y_pos, line)
-        y_pos -= 20 
+        c.drawString(70, y_pos, line); y_pos -= 20 
         
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(50, 50, f"Document généré par le système ARGOS le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}")
     
-    c.save()
-    buffer.seek(0)
+    c.save(); buffer.seek(0)
     return buffer
 
 # --- TITRE ---
@@ -263,17 +241,13 @@ with st.sidebar:
                     st.session_state["role"] = data.get("role", "AGENT") 
                     st.success("✅ Connexion réussie !")
                     st.rerun()
-                else: 
-                    st.error("❌ Identifiants incorrects")
-            except Exception as e:
-                st.error("⛔ Serveur inaccessible (Réveil en cours...)")
+                else: st.error("❌ Identifiants incorrects")
+            except Exception as e: st.error("⛔ Serveur inaccessible (Réveil en cours...)")
     
     else:
         st.success(f"👤 {st.session_state['user_email']} ({st.session_state['role']})")
         if st.button("Se déconnecter"): 
-            st.session_state["token"] = None
-            st.session_state["user_email"] = ""
-            st.session_state["role"] = ""
+            st.session_state["token"] = None; st.session_state["user_email"] = ""; st.session_state["role"] = ""
             st.rerun()
 
 # --- APP PRINCIPALE ---
@@ -281,8 +255,7 @@ if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
-    if st.session_state["role"] == "ADMIN":
-        menu_options.append("👥 Utilisateurs") 
+    if st.session_state["role"] == "ADMIN": menu_options.append("👥 Utilisateurs") 
         
     menu = st.sidebar.radio("Menu", menu_options)
 
@@ -318,58 +291,37 @@ if st.session_state["token"]:
                         r = requests.post(f"{API_URL}/clients/", json={"full_name": name, "entity_type": "Physique", "national_id": nid, "country_residence": "CI", "tenant_id": "MANUAL"}, headers=headers)
                         if r.status_code == 200:
                             d = r.json()
-                            risk = d.get("risk_score")
-                            details = d.get("details", "Non spécifié")
-                            sim_score = d.get("similarity_score", 0) 
+                            risk = d.get("risk_score"); details = d.get("details", "Non spécifié"); sim_score = d.get("similarity_score", 0) 
                             status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
                             
                             res_col1, res_col2 = st.columns([1, 1])
-                            
                             with res_col1:
                                 st.write("### 📝 Rapport d'Analyse")
-                                if status == "ALERTE": 
-                                    st.error(f"{details}") 
-                                else: 
-                                    st.success(f"{details}")
-                                
+                                if status == "ALERTE": st.error(f"{details}") 
+                                else: st.success(f"{details}")
                                 pdf = create_kyc_pdf(name, nid, status, details)
                                 st.download_button("Télécharger Rapport PDF", pdf, "rapport_kyc.pdf", "application/pdf")
                             
                             with res_col2:
                                 score_val = sim_score if status == "ALERTE" else 10
                                 bar_color = "red" if status == "ALERTE" else "green"
-                                
                                 fig = go.Figure(go.Indicator(
-                                    mode = "gauge+number",
-                                    value = score_val,
-                                    title = {'text': "Niveau de Risque", 'font': {'size': 20}},
-                                    gauge = {
-                                        'axis': {'range': [0, 100]},
-                                        'bar': {'color': bar_color},
-                                        'steps': [
-                                            {'range': [0, 40], 'color': "#e6ffe6"}, 
-                                            {'range': [40, 75], 'color': "#fff0b3"}, 
-                                            {'range': [75, 100], 'color': "#ffe6e6"} 
-                                        ]
-                                    }
+                                    mode = "gauge+number", value = score_val, title = {'text': "Niveau de Risque", 'font': {'size': 20}},
+                                    gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': bar_color}, 'steps': [{'range': [0, 40], 'color': "#e6ffe6"}, {'range': [40, 75], 'color': "#fff0b3"}, {'range': [75, 100], 'color': "#ffe6e6"}]}
                                 ))
                                 fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
                                 st.plotly_chart(fig, use_container_width=True)
 
                             save_scan(name, status, details)
                             log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
-                            
-                        else:
-                            st.error(f"❌ Erreur Backend {r.status_code}")
-                    except Exception as e: 
-                        st.error(f"Erreur connexion : {e}")
+                        else: st.error(f"❌ Erreur Backend {r.status_code}")
+                    except Exception as e: st.error(f"Erreur connexion : {e}")
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             if upl and st.button("Scanner Liste"):
                 df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
-                res = []
-                bar = st.progress(0)
+                res = []; bar = st.progress(0)
                 for i, row in df.iterrows():
                     n = row.get('Nom', row.get('Name', 'Inconnu'))
                     client_id = row.get('ID', row.get('Matricule', 'N/A'))
@@ -379,8 +331,7 @@ if st.session_state["token"]:
                         stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
                         res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
                         save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
-                    except: 
-                        res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                    except: res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
                     bar.progress((i+1)/len(df))
                 
                 fin = pd.DataFrame(res)
@@ -392,38 +343,29 @@ if st.session_state["token"]:
         st.subheader("🚦 Centre de Traitement des Alertes")
         df_a = get_alerts()
         
-        if df_a.empty:
-            st.info("RAS : Aucune alerte en attente de traitement.")
+        if df_a.empty: st.info("RAS : Aucune alerte en attente de traitement.")
         else:
             now = datetime.now()
-            
             def calculate_sla(row):
-                if row['status'] == 'FERME':
-                    return "✅ Traité"
+                if row['status'] == 'FERME': return "✅ Traité"
                 try:
                     created_dt = pd.to_datetime(row['created_at']).replace(tzinfo=None)
                     delta_hours = (now - created_dt).total_seconds() / 3600
                     if delta_hours > 48: return "🚨 HORS DÉLAI (>48h)"
                     elif delta_hours > 24: return "⚠️ Attention (>24h)"
                     else: return "🟢 Dans les temps"
-                except:
-                    return "Inconnu"
+                except: return "Inconnu"
 
             df_a['SLA'] = df_a.apply(calculate_sla, axis=1)
-            
-            if 'created_at' in df_a.columns:
-                df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+            if 'created_at' in df_a.columns: df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
             st.write("### 🗂️ Filtres rapides")
             filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
-            
             df_filtered = df_a.copy() if filter_stat == "Toutes" else df_a[df_a['status'] == filter_stat].copy()
             
-            if df_filtered.empty:
-                st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
+            if df_filtered.empty: st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
             else:
                 df_filtered['Priorité'] = df_filtered['similarity_score'].apply(lambda x: '🔴 Haute' if x >= 90 else '🟠 Moyenne')
-                
                 alert_options = df_filtered.apply(lambda r: f"Dossier #{r['id']} | {r['SLA']} | {r['client_name']} (Similitude: {r['similarity_score']}%)", axis=1).tolist()
                 alert_ids = df_filtered['id'].tolist()
                 
@@ -439,77 +381,46 @@ if st.session_state["token"]:
                     elif "Attention" in row['SLA']: st.warning(f"**Délai de traitement (SLA) : {row['SLA']}**")
                     else: st.success(f"**Délai de traitement (SLA) : {row['SLA']}**")
 
-                    st.write(f"**Priorité IA :** {row['Priorité']}")
-                    st.write(f"**Client scanné :** {row['client_name']}")
-                    st.write(f"**Cible détectée :** {row['matched_name']}")
-                    st.write(f"**Score de similitude :** {row['similarity_score']}%")
-                    st.write(f"**Date d'ouverture :** {row.get('created_at_str', 'N/A')}")
-                    st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
+                    st.write(f"**Priorité IA :** {row['Priorité']}"); st.write(f"**Client scanné :** {row['client_name']}")
+                    st.write(f"**Cible détectée :** {row['matched_name']}"); st.write(f"**Score de similitude :** {row['similarity_score']}%")
+                    st.write(f"**Date d'ouverture :** {row.get('created_at_str', 'N/A')}"); st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
                     st.info(f"**Statut actuel :** {row['status']}")
-                    
                     st.markdown("---")
                     investigation_pdf = create_investigation_pdf(row.to_dict())
-                    st.download_button(
-                        label="📄 Télécharger le Rapport d'Investigation",
-                        data=investigation_pdf,
-                        file_name=f"rapport_investigation_alerte_{sel_id}.pdf",
-                        mime="application/pdf",
-                        type="secondary"
-                    )
+                    st.download_button(label="📄 Télécharger le Rapport d'Investigation", data=investigation_pdf, file_name=f"rapport_investigation_alerte_{sel_id}.pdf", mime="application/pdf", type="secondary")
 
                 with col_form:
                     st.markdown("### ✍️ Décision & Preuves")
-                    
                     users_df = get_users()
                     agent_list = ["Non assigné"]
-                    if not users_df.empty:
-                        agent_list += users_df['email'].tolist()
+                    if not users_df.empty: agent_list += users_df['email'].tolist()
                     
-                    # --- FILTRE DE SÉCURITÉ CONTRE LES "NaN" ---
-                    current_assignee = row.get('assigned_to')
-                    if pd.isna(current_assignee) or current_assignee not in agent_list: 
-                        current_assignee = "Non assigné"
+                    current_assignee = row.get('assigned_to'); current_stat = row.get('status'); current_dec = row.get('decision'); current_comm = row.get('comments')
+                    if pd.isna(current_assignee) or current_assignee not in agent_list: current_assignee = "Non assigné"
+                    if pd.isna(current_stat) or current_stat not in ["OUVERT", "EN_COURS", "FERME"]: current_stat = "OUVERT"
+                    if pd.isna(current_dec) or current_dec not in ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"]: current_dec = "EN_ATTENTE"
+                    if pd.isna(current_comm) or current_comm == "None": current_comm = ""
 
-                    current_stat = row.get('status')
-                    if pd.isna(current_stat) or current_stat not in ["OUVERT", "EN_COURS", "FERME"]: 
-                        current_stat = "OUVERT"
-
-                    current_dec = row.get('decision')
-                    if pd.isna(current_dec) or current_dec not in ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"]: 
-                        current_dec = "EN_ATTENTE"
-
-                    current_comm = row.get('comments')
-                    if pd.isna(current_comm) or current_comm == "None": 
-                        current_comm = ""
-
-                    with st.form("alert_update_form"):
+                    with st.form("alert_update_form", clear_on_submit=True):
                         new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
                         new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], index=["OUVERT", "EN_COURS", "FERME"].index(current_stat))
                         new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"], index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
                         new_comm = st.text_area("Commentaires / Justification", value=str(current_comm))
-                        
                         st.markdown("**📎 Pièces justificatives**")
                         uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
 
                         if st.form_submit_button("Enregistrer la décision"):
                             final_comm = new_comm
-                            if uploaded_file:
-                                final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
-
-                            payload = {
-                                "status": new_status,
-                                "decision": new_decision,
-                                "comments": final_comm,
-                                "assigned_to": new_assignee
-                            }
+                            if uploaded_file: final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
+                            payload = {"status": new_status, "decision": new_decision, "comments": final_comm, "assigned_to": new_assignee}
                             success, message = update_alert_api(sel_id, payload)
                             if success:
                                 st.success("✅ Dossier mis à jour avec succès !")
                                 file_log = f"| Fichier: {uploaded_file.name}" if uploaded_file else ""
                                 log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision} {file_log}")
+                                time.sleep(1.5)
                                 st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
+                            else: st.error(f"❌ {message}")
 
             st.markdown("---")
             st.write("### 📋 Historique Complet (Filtré)")
@@ -519,96 +430,96 @@ if st.session_state["token"]:
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes")
-        
         tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
 
         with tabs[0]:
             st.info("Ajouter individuellement une personne à une liste locale.")
             all_lists = get_all_lists()
             manual_lists = [L for L in all_lists if L != "Listes Internationales"]
-            
             c1, c2 = st.columns(2)
-            with c1:
-                target_list = st.selectbox("Choisir la Liste cible", manual_lists)
-                bad_name = st.text_input("Nom de la personne / Entité")
-            with c2:
-                details = st.text_input("Motif / Détails")
+            with c1: target_list = st.selectbox("Choisir la Liste cible", manual_lists); bad_name = st.text_input("Nom de la personne / Entité")
+            with c2: details = st.text_input("Motif / Détails")
             
-            if st.button("Ajouter à la liste", type="primary"):
-                if bad_name and target_list:
-                    full_details = f"[{target_list}] {details}"
-                    payload = {"name": bad_name, "list_source": target_list}
-                    try:
-                        r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                        if r.status_code == 200:
-                            st.success(f"✅ {bad_name} ajouté à '{target_list}' avec succès.")
-                            log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
-                        else: st.error("Erreur serveur ou format de donnée incorrect.")
-                    except Exception as e: st.error(f"Erreur: {e}")
-                else: st.warning("Veuillez remplir le nom et choisir une liste.")
+            with st.form("manual_add_form", clear_on_submit=True):
+                submit_man = st.form_submit_button("Ajouter à la liste", type="primary")
+                if submit_man:
+                    if bad_name and target_list:
+                        payload = {"name": bad_name, "list_source": target_list}
+                        try:
+                            r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
+                            if r.status_code == 200:
+                                st.success(f"✅ '{bad_name}' ajouté à '{target_list}' avec succès.")
+                                log_action(st.session_state["user_email"], "AJOUT_MANUEL", bad_name, f"Liste: {target_list}")
+                            else: st.error("Erreur serveur ou format incorrect.")
+                        except Exception as e: st.error(f"Erreur: {e}")
+                    else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
         with tabs[1]:
             st.info("Mettre à jour une liste (Locale ou Internationale) via Excel/CSV.")
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
-            upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
             
-            if upl_file and st.button("Importer les données 📥"):
-                try:
-                    df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
-                    st.write(f"Aperçu ({len(df)} entrées) :")
-                    st.dataframe(df.head(3))
-                    progress = st.progress(0); count_ok = 0
-                    for i, row in df.iterrows():
-                        name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
-                        if name_val != "Inconnu":
-                            payload = {"name": str(name_val), "list_source": target_list_import}
-                            r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
-                            if r.status_code == 200: 
-                                count_ok += 1
-                        progress.progress((i+1)/len(df))
-                    
-                    if count_ok > 0:
-                        st.success(f"✅ Import terminé ! {count_ok} entrées ajoutées à '{target_list_import}'.")
-                        log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
-                    else:
-                        st.error("❌ L'import a échoué. Vérifie que le Backend fonctionne.")
-                except Exception as e: st.error(f"Erreur de lecture : {e}")
+            with st.form("import_form", clear_on_submit=True):
+                upl_file = st.file_uploader("Fichier de mise à jour", type=["csv", "xlsx"])
+                submit_imp = st.form_submit_button("Importer les données 📥")
+                if submit_imp and upl_file:
+                    try:
+                        df = pd.read_csv(upl_file) if upl_file.name.endswith('.csv') else pd.read_excel(upl_file)
+                        st.write(f"Aperçu ({len(df)} entrées) :")
+                        st.dataframe(df.head(3))
+                        progress = st.progress(0); count_ok = 0
+                        last_error = ""
+                        
+                        for i, row in df.iterrows():
+                            name_val = row.get('Nom') or row.get('Name') or row.get('Full Name') or "Inconnu"
+                            if name_val != "Inconnu":
+                                payload = {"name": str(name_val), "list_source": target_list_import}
+                                r = requests.post(f"{API_URL}/sanctions/", json=payload, headers=headers)
+                                if r.status_code == 200: count_ok += 1
+                                else: last_error = r.text
+                            progress.progress((i+1)/len(df))
+                        
+                        if count_ok > 0:
+                            st.success(f"✅ Import terminé ! {count_ok} entrées ont bien été ajoutées à '{target_list_import}'.")
+                            log_action(st.session_state["user_email"], "IMPORT_FICHIER", target_list_import, f"Fichier: {upl_file.name}")
+                        else: 
+                            st.error(f"❌ Aucune entrée ajoutée. Raison probable (Doublons ou format) : {last_error}")
+                    except Exception as e: st.error(f"Erreur de lecture : {e}")
 
         with tabs[2]:
             st.write("Définir une nouvelle catégorie de liste.")
-            new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
-            if st.button("Créer la Liste"):
-                if new_list_name:
-                    if new_list_name in get_all_lists(): st.warning("Cette liste existe déjà.")
-                    else:
-                        if add_custom_list(new_list_name):
-                            st.success(f"Liste '{new_list_name}' créée !")
-                            log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
-                            st.rerun()
-                        else: st.error("Erreur serveur.")
+            with st.form("create_list_form", clear_on_submit=True):
+                new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
+                if st.form_submit_button("Créer la Liste"):
+                    if new_list_name:
+                        if new_list_name in get_all_lists(): st.warning("Cette liste existe déjà.")
+                        else:
+                            if add_custom_list(new_list_name):
+                                st.success(f"Liste '{new_list_name}' créée !")
+                                log_action(st.session_state["user_email"], "CREATION_LISTE", new_list_name, "Nouvelle catégorie")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else: st.error("Erreur serveur.")
 
         with tabs[3]:
             st.write("Supprimer une catégorie de liste personnalisée.")
             default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
             all_custom = [L for L in get_all_lists() if L not in default_lists]
             
-            if not all_custom:
-                st.info("Aucune liste personnalisée à supprimer. (Les listes par défaut ne peuvent pas être supprimées).")
+            if not all_custom: st.info("Aucune liste personnalisée à supprimer. (Les listes par défaut ne peuvent pas être supprimées).")
             else:
                 list_to_delete = st.selectbox("Choisir la liste à supprimer", all_custom)
                 if st.button("Supprimer cette liste"):
                     if delete_custom_list(list_to_delete):
                         st.success(f"Liste '{list_to_delete}' supprimée avec succès !")
                         log_action(st.session_state["user_email"], "SUPPRESSION_LISTE", list_to_delete, "Catégorie supprimée")
+                        time.sleep(1.5)
                         st.rerun()
-                    else: 
-                        st.error("Erreur lors de la suppression.")
+                    else: st.error("Erreur lors de la suppression.")
 
         with tabs[4]:
             st.write("Historique des actions administratives (Sauvegardé dans le Cloud).")
             df_logs = get_logs()
-            if not df_logs.empty and 'id' in df_logs.columns:
-                df_logs = df_logs.drop(columns=['id']) 
+            if not df_logs.empty and 'id' in df_logs.columns: df_logs = df_logs.drop(columns=['id']) 
             st.dataframe(df_logs, use_container_width=True)
             if st.button("Rafraîchir les logs"): st.rerun()
 
@@ -619,7 +530,7 @@ if st.session_state["token"]:
         with tab_l:
             st.dataframe(get_users(), use_container_width=True)
         with tab_a:
-            with st.form("new_user"):
+            with st.form("new_user", clear_on_submit=True):
                 n_em = st.text_input("Email")
                 n_nm = st.text_input("Nom")
                 n_ps = st.text_input("Pass", type="password")
@@ -627,10 +538,10 @@ if st.session_state["token"]:
                 if st.form_submit_button("Créer"):
                     ok, msg = create_user(n_em, n_ps, n_nm, n_rl)
                     if ok: 
-                        st.success("Créé")
+                        st.success(f"✅ Le compte de {n_nm} a été créé avec succès !")
+                        time.sleep(1.5)
                         st.rerun()
-                    else: 
-                        st.error("Erreur")
+                    else: st.error("Erreur")
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
