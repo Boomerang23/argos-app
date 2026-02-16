@@ -259,13 +259,12 @@ if st.session_state["token"]:
         
     menu = st.sidebar.radio("Menu", menu_options)
 
-    # === TABLEAU DE BORD (NOUVEAU REPORTING DYNAMIQUE) ===
+    # === TABLEAU DE BORD (REPORTING DYNAMIQUE) ===
     if menu == "📊 Tableau de Bord":
         st.subheader("📊 Reporting Dynamique & Statistiques")
         df = load_stats()
         
         if not df.empty:
-            # Sécurisation du format de date pour le filtrage
             df['date'] = pd.to_datetime(df['date'])
             
             st.write("### 📅 Filtres de période (Extraction Réglementaire)")
@@ -276,7 +275,6 @@ if st.session_state["token"]:
             with col_d1: start_date = st.date_input("Date de début", min_date)
             with col_d2: end_date = st.date_input("Date de fin", max_date)
             
-            # Application du filtre temporel
             mask = (df['date'].dt.date >= start_date) & (df['date'].dt.date <= end_date)
             df_filtered = df.loc[mask]
             
@@ -295,23 +293,20 @@ if st.session_state["token"]:
                 
                 g1, g2 = st.columns(2)
                 with g1: 
-                    # Camembert professionnel avec couleurs fixes
                     fig_pie = px.pie(df_filtered, names='status', title='Ratio de Conformité', color='status', color_discrete_map={'CONFORME':'#28a745', 'ALERTE':'#dc3545'})
                     st.plotly_chart(fig_pie, use_container_width=True)
                     
                 with g2: 
-                    # Nouvelle courbe d'évolution temporelle
                     daily_counts = df_filtered.groupby([df_filtered['date'].dt.date, 'status']).size().reset_index(name='count')
                     fig_line = px.line(daily_counts, x='date', y='count', color='status', title='Évolution des Scans Quotidiens', markers=True, color_discrete_map={'CONFORME':'#28a745', 'ALERTE':'#dc3545'})
                     st.plotly_chart(fig_line, use_container_width=True)
                     
-                # NOUVEAU BOUTON D'EXPORT POUR LE DIRECTEUR
                 st.markdown("---")
                 st.write("### 📥 Exporter le Reporting")
                 st.info("Générez un registre des vérifications KYC de cette période pour répondre aux exigences de la CENTIF ou de la Commission Bancaire.")
                 
                 export_df = df_filtered.copy()
-                export_df['date'] = export_df['date'].dt.strftime('%Y-%m-%d') # Remise au format texte propre
+                export_df['date'] = export_df['date'].dt.strftime('%Y-%m-%d')
                 csv_data = export_df.to_csv(index=False).encode('utf-8')
                 
                 st.download_button(
@@ -324,9 +319,10 @@ if st.session_state["token"]:
         else:
             st.info("Aucune donnée disponible. Lancez un scan pour alimenter les statistiques !")
 
-    # === VÉRIFICATIONS ===
+    # === VÉRIFICATIONS (AVEC LE NOUVEAU BATCH SCREENING) ===
     elif menu == "🔍 Vérifications":
-        t1, t2 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)"])
+        # ICI ON AJOUTE LE 3EME ONGLET t3
+        t1, t2, t3 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)", "🔄 Filtrage Continu (Batch)"])
         
         with t1:
             st.write("Scan rapide d'un individu.")
@@ -386,6 +382,49 @@ if st.session_state["token"]:
                 fin = pd.DataFrame(res)
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
+
+        # NOUVEAU BLOC : LE FILTRAGE CONTINU EN MASSE (BATCH SCREENING)
+        with t3:
+            st.write("### 🔄 Filtrage Continu (Ongoing Screening)")
+            st.info("💡 **Conformité Réglementaire :** Cette fonction récupère la liste de tous vos clients existants et les repasse au crible des dernières listes de sanctions. C'est indispensable pour détecter si un ancien client est devenu une personne à risque hier !")
+            
+            if st.button("🚀 Lancer le Batch Screening Automatique", type="primary"):
+                df_history = load_stats()
+                if df_history.empty:
+                    st.warning("Aucun client dans la base de données historique.")
+                else:
+                    # Récupération des clients uniques de la base
+                    unique_clients = df_history['client_name'].dropna().unique()
+                    st.write(f"🔄 **Lancement de l'analyse en arrière-plan sur {len(unique_clients)} clients uniques...**")
+                    
+                    res_batch = []
+                    bar_batch = st.progress(0)
+                    
+                    for i, client_name in enumerate(unique_clients):
+                        try:
+                            # On re-teste chaque client contre l'API de vérification
+                            r = requests.post(f"{API_URL}/clients/", json={"full_name": str(client_name), "entity_type": "P", "national_id": "BATCH", "country_residence": "CI", "tenant_id": "BATCH"}, headers=headers)
+                            if r.status_code == 200:
+                                d = r.json()
+                                rk = d.get("risk_score", "Low")
+                                stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
+                                res_batch.append({"Nom Client": client_name, "Statut Actuel": stt, "Détail / Motif": d.get("details", "")})
+                                
+                                # On sauvegarde le nouveau statut dans l'historique
+                                save_scan(str(client_name), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Filtrage Continu (Batch)")
+                            else:
+                                res_batch.append({"Nom Client": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": f"Code {r.status_code}"})
+                        except:
+                            res_batch.append({"Nom Client": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": "Erreur serveur"})
+                        
+                        bar_batch.progress((i+1)/len(unique_clients))
+                    
+                    df_res_batch = pd.DataFrame(res_batch)
+                    new_alerts = len(df_res_batch[df_res_batch['Statut Actuel'].str.contains("REJETÉ")])
+                    
+                    st.success(f"✅ Filtrage continu terminé ! **{new_alerts} alerte(s) détectée(s)** sur la base cliente.")
+                    st.dataframe(df_res_batch, use_container_width=True)
+                    log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Clients Existante", f"{len(unique_clients)} clients revérifiés.")
 
     # === CENTRE D'ALERTES ===
     elif menu == "🚦 Alertes":
