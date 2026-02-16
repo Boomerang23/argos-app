@@ -3,7 +3,7 @@ import textwrap
 import requests
 import pandas as pd
 import io
-import time # <-- NOUVEAU : Pour les pauses d'affichage
+import time
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
@@ -338,9 +338,9 @@ if st.session_state["token"]:
                 st.dataframe(fin)
                 st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
 
-    # === CENTRE D'ALERTES ===
+    # === CENTRE D'ALERTES (NOUVEAU WORKFLOW MAKER/CHECKER) ===
     elif menu == "🚦 Alertes":
-        st.subheader("🚦 Centre de Traitement des Alertes")
+        st.subheader("🚦 Centre de Traitement (Principe des 4 Yeux)")
         df_a = get_alerts()
         
         if df_a.empty: st.info("RAS : Aucune alerte en attente de traitement.")
@@ -360,7 +360,8 @@ if st.session_state["token"]:
             if 'created_at' in df_a.columns: df_a['created_at_str'] = pd.to_datetime(df_a['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
             st.write("### 🗂️ Filtres rapides")
-            filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "FERME"], horizontal=True)
+            # Ajout du filtre "A_VALIDER"
+            filter_stat = st.radio("Afficher les alertes :", ["Toutes", "OUVERT", "EN_COURS", "A_VALIDER", "FERME"], horizontal=True)
             df_filtered = df_a.copy() if filter_stat == "Toutes" else df_a[df_a['status'] == filter_stat].copy()
             
             if df_filtered.empty: st.warning(f"Aucune alerte trouvée avec le filtre : {filter_stat}")
@@ -390,44 +391,84 @@ if st.session_state["token"]:
                     st.download_button(label="📄 Télécharger le Rapport d'Investigation", data=investigation_pdf, file_name=f"rapport_investigation_alerte_{sel_id}.pdf", mime="application/pdf", type="secondary")
 
                 with col_form:
-                    st.markdown("### ✍️ Décision & Preuves")
+                    st.markdown("### ✍️ Décision & Preuves (Maker / Checker)")
                     users_df = get_users()
                     agent_list = ["Non assigné"]
                     if not users_df.empty: agent_list += users_df['email'].tolist()
                     
                     current_assignee = row.get('assigned_to'); current_stat = row.get('status'); current_dec = row.get('decision'); current_comm = row.get('comments')
                     if pd.isna(current_assignee) or current_assignee not in agent_list: current_assignee = "Non assigné"
-                    if pd.isna(current_stat) or current_stat not in ["OUVERT", "EN_COURS", "FERME"]: current_stat = "OUVERT"
+                    if pd.isna(current_stat) or current_stat not in ["OUVERT", "EN_COURS", "A_VALIDER", "FERME"]: current_stat = "OUVERT"
                     if pd.isna(current_dec) or current_dec not in ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"]: current_dec = "EN_ATTENTE"
                     if pd.isna(current_comm) or current_comm == "None": current_comm = ""
 
-                    with st.form("alert_update_form", clear_on_submit=True):
-                        new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
-                        new_status = st.selectbox("Changer Statut", ["OUVERT", "EN_COURS", "FERME"], index=["OUVERT", "EN_COURS", "FERME"].index(current_stat))
-                        new_decision = st.selectbox("Décision Finale", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"], index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
-                        new_comm = st.text_area("Commentaires / Justification", value=str(current_comm))
-                        st.markdown("**📎 Pièces justificatives**")
-                        uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
+                    user_role = st.session_state.get("role", "AGENT")
 
-                        if st.form_submit_button("Enregistrer la décision"):
-                            final_comm = new_comm
-                            if uploaded_file: final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
-                            payload = {"status": new_status, "decision": new_decision, "comments": final_comm, "assigned_to": new_assignee}
-                            success, message = update_alert_api(sel_id, payload)
-                            if success:
-                                st.success("✅ Dossier mis à jour avec succès !")
-                                file_log = f"| Fichier: {uploaded_file.name}" if uploaded_file else ""
-                                log_action(st.session_state["user_email"], "TRAITEMENT_ALERTE", str(sel_id), f"Décision: {new_decision} {file_log}")
-                                time.sleep(1.5)
-                                st.rerun()
-                            else: st.error(f"❌ {message}")
+                    with st.form("alert_update_form", clear_on_submit=True):
+                        st.markdown(f"**Votre Rôle Actuel :** `{user_role}`")
+                        new_assignee = st.selectbox("👤 Assigner le dossier à :", agent_list, index=agent_list.index(current_assignee))
+                        
+                        # --- WORKFLOW 1 : CHECKER (L'ADMIN VALIDE) ---
+                        if current_stat == "A_VALIDER" and user_role == "ADMIN":
+                            st.warning("👁️ Action requise (Checker) : Validez ou rejetez la proposition de l'Agent.")
+                            st.text_area("Historique du dossier :", value=str(current_comm), disabled=True)
+                            
+                            action_checker = st.radio("Décision de supervision :", ["✅ Approuver (Fermer le dossier)", "❌ Rejeter (Retour à l'Agent)"])
+                            checker_comm = st.text_input("Commentaire de supervision :")
+                            
+                            if st.form_submit_button("Valider la Supervision"):
+                                final_status = "FERME" if "Approuver" in action_checker else "EN_COURS"
+                                final_comm = current_comm + f"\n\n🛑 [CHECKER - {st.session_state['user_email']}] {action_checker} : {checker_comm}"
+                                payload = {"status": final_status, "decision": current_dec, "comments": final_comm, "assigned_to": new_assignee}
+                                success, message = update_alert_api(sel_id, payload)
+                                if success:
+                                    st.success("✅ Supervision appliquée !")
+                                    log_action(st.session_state["user_email"], "SUPERVISION", str(sel_id), f"Action: {action_checker}")
+                                    time.sleep(1.5); st.rerun()
+                                else: st.error(f"❌ {message}")
+                                
+                        # --- WORKFLOW 2 : MAKER (L'AGENT EST BLOQUÉ EN ATTENTE) ---
+                        elif current_stat == "A_VALIDER" and user_role == "AGENT":
+                            st.info("⏳ Ce dossier a été soumis et est en attente de validation par un Superviseur (Principe des 4 Yeux).")
+                            st.text_area("Vos commentaires :", value=str(current_comm), disabled=True)
+                            st.form_submit_button("🔒 Dossier verrouillé", disabled=True)
+                            
+                        # --- WORKFLOW 3 : MAKER (L'AGENT OU L'ADMIN PROPOSE UNE DÉCISION) ---
+                        else:
+                            st.write("🛠️ **Proposer une action (Maker)**")
+                            
+                            # BRIDAGE : Un AGENT ne peut plus fermer un dossier tout seul !
+                            if user_role == "ADMIN": list_status = ["OUVERT", "EN_COURS", "A_VALIDER", "FERME"]
+                            else: list_status = ["OUVERT", "EN_COURS", "A_VALIDER"]
+                                
+                            new_status = st.selectbox("Changer Statut", list_status, index=list_status.index(current_stat) if current_stat in list_status else 0)
+                            new_decision = st.selectbox("Proposition de Décision", ["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"], index=["EN_ATTENTE", "FAUX_POSITIF", "CONFIRME"].index(current_dec))
+                            new_comm = st.text_area("Commentaires / Justification", value=str(current_comm))
+                            st.markdown("**📎 Pièces justificatives**")
+                            uploaded_file = st.file_uploader("Joindre un fichier (PDF, JPG, PNG)", type=["pdf", "png", "jpg", "jpeg"])
+
+                            if st.form_submit_button("Enregistrer l'action"):
+                                final_comm = new_comm
+                                if uploaded_file: final_comm += f" \n\n📎 [Preuve jointe : {uploaded_file.name}]"
+                                
+                                # Si le Maker envoie en validation, on signe son acte
+                                if new_status == "A_VALIDER":
+                                    final_comm += f"\n\n📝 [MAKER - {st.session_state['user_email']}] Dossier soumis pour validation."
+
+                                payload = {"status": new_status, "decision": new_decision, "comments": final_comm, "assigned_to": new_assignee}
+                                success, message = update_alert_api(sel_id, payload)
+                                if success:
+                                    st.success("✅ Action enregistrée !")
+                                    log_action(st.session_state["user_email"], "TRAITEMENT_MAKER", str(sel_id), f"Statut: {new_status}")
+                                    time.sleep(1.5); st.rerun()
+                                else: st.error(f"❌ {message}")
 
             st.markdown("---")
             st.write("### 📋 Historique Complet (Filtré)")
             columns_to_show = ['id', 'SLA', 'Priorité', 'client_name', 'status', 'assigned_to', 'created_at_str']
             st.dataframe(df_filtered[columns_to_show], use_container_width=True)
 
-   # === GESTION DES LISTES ===
+    # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes")
         tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
@@ -565,4 +606,3 @@ if st.session_state["token"]:
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
