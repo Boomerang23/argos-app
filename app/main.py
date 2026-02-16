@@ -109,12 +109,16 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
 
 @app.post("/sanctions/", response_model=schemas.SanctionOut)
 def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db)):
-    db_sanction = models.Sanction(**sanction.dict())
-    db.add(db_sanction)
-    db.commit()
-    db.refresh(db_sanction)
-    return db_sanction
-
+    try:
+        db_sanction = models.Sanction(**sanction.dict())
+        db.add(db_sanction)
+        db.commit()
+        db.refresh(db_sanction)
+        return db_sanction
+    except Exception as e:
+        db.rollback() # IMPORTANT : On annule la transaction SQL bloquée
+        raise HTTPException(status_code=400, detail="Ce nom existe déjà dans la base de données ou le format est invalide.")
+        
 from .services import ScreeningService
 
 @app.post("/screening/check", response_model=schemas.ScreeningResult)
@@ -240,5 +244,6 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
 
 
