@@ -107,16 +107,18 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "details": "✅ RAS - Aucune correspondance significative"
         }
 
-@app.post("/sanctions/", response_model=schemas.SanctionOut)
+# ON RETIRE le "response_model=schemas.SanctionOut" pour éviter le crash de l'ID
+@app.post("/sanctions/")
 def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db)):
     try:
         db_sanction = models.Sanction(**sanction.dict())
         db.add(db_sanction)
         db.commit()
         db.refresh(db_sanction)
-        return db_sanction
+        # On renvoie un dictionnaire simple, sans passer par le schéma strict
+        return {"status": "success", "name": db_sanction.name}
     except Exception as e:
-        db.rollback() # IMPORTANT : On annule la transaction SQL bloquée
+        db.rollback() 
         raise HTTPException(status_code=400, detail="Ce nom existe déjà dans la base de données ou le format est invalide.")
         
 from .services import ScreeningService
@@ -244,6 +246,7 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
 
 
 
