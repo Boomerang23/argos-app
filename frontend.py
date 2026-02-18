@@ -253,10 +253,12 @@ st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", 
 st.markdown("<h4 style='text-align: center;'>Système de Gestion des référentiels KYC</h4>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# --- LOGIN ---
+# --- LOGIN & VARIABLES DE SESSION ---
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 if "role" not in st.session_state: st.session_state["role"] = "" 
+# --- NOUVEAU : Initialisation de la mémoire pour le scan de masse ---
+if "bulk_results" not in st.session_state: st.session_state["bulk_results"] = None
 
 with st.sidebar:
     st.title("🛡️")
@@ -285,6 +287,7 @@ with st.sidebar:
         st.success(f"👤 {st.session_state['user_email']} ({st.session_state['role']})")
         if st.button("Se déconnecter"): 
             st.session_state["token"] = None; st.session_state["user_email"] = ""; st.session_state["role"] = ""
+            st.session_state["bulk_results"] = None # Nettoyage à la déconnexion
             st.rerun()
 
 # --- APP PRINCIPALE ---
@@ -398,16 +401,14 @@ if st.session_state["token"]:
                             log_action(st.session_state["user_email"], "SCAN_UNITAIRE", name, status)
                         else: st.error(f"❌ Erreur Backend {r.status_code}")
                     except Exception as e: st.error(f"Erreur connexion : {e}")
+        
+        # --- SECTION CORRIGÉE : SCAN DE MASSE ---
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             
-            # --- CORRECTION 1 : Initialisation de la mémoire pour cet onglet ---
-            if "bulk_results" not in st.session_state:
-                st.session_state["bulk_results"] = None
-
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             
-            # Si on change de fichier, on peut vouloir nettoyer les résultats précédents
+            # Si on change de fichier ou supprime le fichier, on réinitialise les résultats
             if upl is None:
                 st.session_state["bulk_results"] = None
 
@@ -415,42 +416,30 @@ if st.session_state["token"]:
                 with st.spinner("Analyse du fichier en cours..."):
                     df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
                     res = []; bar = st.progress(0)
-                    
                     for i, row in df.iterrows():
                         n = row.get('Nom', row.get('Name', 'Inconnu'))
                         client_id = row.get('ID', row.get('Matricule', 'N/A'))
                         try:
-                            # Appel API
                             r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
-                            
                             rk = r.json().get("risk_score", "Low")
                             stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
-                            
                             res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
-                            
-                            # Sauvegarde historique (seulement si rejeté pour ne pas spammer ?) ou tout
                             save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
-                        except: 
-                            res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
-                        
+                        except: res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
                         bar.progress((i+1)/len(df))
                     
-                    # Création du DataFrame final
-                    fin = pd.DataFrame(res)
-                    
-                    # --- CORRECTION 2 : Sauvegarde dans la mémoire de session ---
-                    st.session_state["bulk_results"] = fin
-                    st.success("✅ Scan terminé avec succès !")
+                    # On stocke le résultat dans la mémoire de Streamlit
+                    st.session_state["bulk_results"] = pd.DataFrame(res)
+                    st.success("✅ Analyse terminée !")
 
-            # --- CORRECTION 3 : Affichage persistant (Hors du bloc du bouton) ---
+            # Affichage persistant : tant qu'il y a un résultat en mémoire, on l'affiche.
             if st.session_state["bulk_results"] is not None:
                 st.write("### 📊 Résultats du Scan de Masse")
-                st.dataframe(st.session_state["bulk_results"], use_container_width=True)
+                st.dataframe(st.session_state["bulk_results"])
                 
-                # Le bouton est ici, et comme 'bulk_results' est en mémoire, 
-                # cliquer dessus ne fera plus disparaître le tableau !
+                # Le bouton est en dehors de la condition if st.button("Scanner Liste"), il ne fera plus tout disparaître
                 st.download_button(
-                    label="📥 Télécharger Rapport PDF Global", 
+                    label="📄 Télécharger Rapport PDF Global", 
                     data=create_global_report(st.session_state["bulk_results"]), 
                     file_name="rapport_global_argos.pdf",
                     mime="application/pdf"
@@ -621,9 +610,47 @@ if st.session_state["token"]:
     # === GESTION DES LISTES ===
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes")
-        tabs = st.tabs(["📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
+        
+        # --- CORRECTION : AJOUT DE L'ONGLET CONSULTER ---
+        tabs = st.tabs(["👁️ Consulter Contenu", "📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
 
+        # --- NOUVEAU BLOC : CONSULTATION ---
         with tabs[0]:
+            st.write("### 🧐 Explorer le contenu des listes")
+            st.info("Vérifiez les données actuellement chargées dans votre moteur de conformité.")
+            
+            col_choice, col_btn = st.columns([3, 1])
+            with col_choice:
+                target_list_view = st.selectbox("Quelle liste voulez-vous inspecter ?", get_all_lists())
+            
+            with col_btn:
+                st.write("") 
+                st.write("") 
+                load_btn = st.button("Charger les données 📥")
+
+            if load_btn:
+                with st.spinner(f"Récupération des entrées de '{target_list_view}'..."):
+                    try:
+                        r = requests.get(f"{API_URL}/sanctions/view", params={"list_name": target_list_view}, headers=headers)
+                        if r.status_code == 200:
+                            data = r.json()
+                            if len(data) > 0:
+                                df_view = pd.DataFrame(data)
+                                st.success(f"✅ {len(df_view)} entrées trouvées.")
+                                # On affiche les colonnes les plus pertinentes
+                                cols_to_display = [c for c in ['id', 'name', 'list_source'] if c in df_view.columns]
+                                if cols_to_display:
+                                    st.dataframe(df_view[cols_to_display], use_container_width=True)
+                                else:
+                                    st.dataframe(df_view, use_container_width=True)
+                            else:
+                                st.warning("⚠️ Cette liste est vide pour le moment.")
+                        else:
+                            st.error(f"Erreur serveur : {r.status_code}")
+                    except Exception as e:
+                        st.error(f"Impossible de se connecter au serveur : {e}")
+
+        with tabs[1]:
             st.info("Ajouter individuellement une personne à une liste locale.")
             all_lists = get_all_lists()
             manual_lists = [L for L in all_lists if L != "Listes Internationales"]
@@ -647,7 +674,7 @@ if st.session_state["token"]:
                             st.error(f"❌ Impossible de joindre le serveur : {e}")
                     else: st.warning("Veuillez remplir le nom et choisir une liste.")
 
-        with tabs[1]:
+        with tabs[2]:
             st.info("Mettre à jour une liste via import multi-formats (CSV, Excel, JSON, XML).")
             target_list_import = st.selectbox("Sélectionner la Liste à mettre à jour", get_all_lists())
             
@@ -684,7 +711,7 @@ if st.session_state["token"]:
                             st.error(f"❌ L'import a échoué. Détail technique : {last_error}")
                     except Exception as e: st.error(f"Erreur technique de lecture du fichier : {e}")
 
-        with tabs[2]:
+        with tabs[3]:
             st.write("Définir une nouvelle catégorie de liste et son niveau de risque.")
             with st.form("create_list_form", clear_on_submit=True):
                 new_list_name = st.text_input("Nom de la nouvelle liste (ex: Liste Noire Fournisseurs)")
@@ -704,7 +731,7 @@ if st.session_state["token"]:
                                 st.rerun()
                             else: st.error("Erreur serveur.")
 
-        with tabs[3]:
+        with tabs[4]:
             st.write("Supprimer une catégorie de liste personnalisée.")
             default_lists = ["PEP Locale", "Sanction Locale", "Listes Internationales"]
             all_custom = [L for L in get_all_lists() if L not in default_lists]
@@ -720,7 +747,7 @@ if st.session_state["token"]:
                         st.rerun()
                     else: st.error("Erreur lors de la suppression.")
 
-        with tabs[4]:
+        with tabs[5]:
             st.write("Historique des actions administratives (Sauvegardé dans le Cloud).")
             df_logs = get_logs()
             if not df_logs.empty and 'id' in df_logs.columns: df_logs = df_logs.drop(columns=['id']) 
@@ -853,4 +880,3 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
