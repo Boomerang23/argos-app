@@ -120,7 +120,14 @@ def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(databas
     except Exception as e:
         db.rollback() 
         raise HTTPException(status_code=400, detail="Ce nom existe déjà dans la base de données ou le format est invalide.")
-        
+
+# --- AJOUT : Route pour lire le contenu d'une liste ---
+@app.get("/sanctions/view")
+def get_sanctions_by_list(list_name: str, db: Session = Depends(database.get_db)):
+    """Récupère toutes les entrées d'une liste spécifique pour affichage"""
+    items = db.query(models.Sanction).filter(models.Sanction.list_source == list_name).all()
+    return items
+    
 from .services import ScreeningService
 
 @app.post("/screening/check", response_model=schemas.ScreeningResult)
@@ -246,6 +253,7 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
 
 
 
