@@ -400,25 +400,61 @@ if st.session_state["token"]:
                     except Exception as e: st.error(f"Erreur connexion : {e}")
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
+            
+            # --- CORRECTION 1 : Initialisation de la mémoire pour cet onglet ---
+            if "bulk_results" not in st.session_state:
+                st.session_state["bulk_results"] = None
+
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
+            
+            # Si on change de fichier, on peut vouloir nettoyer les résultats précédents
+            if upl is None:
+                st.session_state["bulk_results"] = None
+
             if upl and st.button("Scanner Liste"):
-                df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
-                res = []; bar = st.progress(0)
-                for i, row in df.iterrows():
-                    n = row.get('Nom', row.get('Name', 'Inconnu'))
-                    client_id = row.get('ID', row.get('Matricule', 'N/A'))
-                    try:
-                        r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
-                        rk = r.json().get("risk_score", "Low")
-                        stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
-                        res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
-                        save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
-                    except: res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
-                    bar.progress((i+1)/len(df))
+                with st.spinner("Analyse du fichier en cours..."):
+                    df = pd.read_csv(upl) if upl.name.endswith('.csv') else pd.read_excel(upl)
+                    res = []; bar = st.progress(0)
+                    
+                    for i, row in df.iterrows():
+                        n = row.get('Nom', row.get('Name', 'Inconnu'))
+                        client_id = row.get('ID', row.get('Matricule', 'N/A'))
+                        try:
+                            # Appel API
+                            r = requests.post(f"{API_URL}/clients/", json={"full_name": str(n), "entity_type": "P", "national_id": str(client_id), "country_residence": "CI", "tenant_id": "BULK"}, headers=headers)
+                            
+                            rk = r.json().get("risk_score", "Low")
+                            stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
+                            
+                            res.append({"Nom": n, "ID": client_id, "Statut": stt, "Détail": r.json().get("details", "")})
+                            
+                            # Sauvegarde historique (seulement si rejeté pour ne pas spammer ?) ou tout
+                            save_scan(str(n), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Bulk Scan")
+                        except: 
+                            res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
+                        
+                        bar.progress((i+1)/len(df))
+                    
+                    # Création du DataFrame final
+                    fin = pd.DataFrame(res)
+                    
+                    # --- CORRECTION 2 : Sauvegarde dans la mémoire de session ---
+                    st.session_state["bulk_results"] = fin
+                    st.success("✅ Scan terminé avec succès !")
+
+            # --- CORRECTION 3 : Affichage persistant (Hors du bloc du bouton) ---
+            if st.session_state["bulk_results"] is not None:
+                st.write("### 📊 Résultats du Scan de Masse")
+                st.dataframe(st.session_state["bulk_results"], use_container_width=True)
                 
-                fin = pd.DataFrame(res)
-                st.dataframe(fin)
-                st.download_button("Rapport PDF Global", create_global_report(fin), "rapport_global.pdf")
+                # Le bouton est ici, et comme 'bulk_results' est en mémoire, 
+                # cliquer dessus ne fera plus disparaître le tableau !
+                st.download_button(
+                    label="📥 Télécharger Rapport PDF Global", 
+                    data=create_global_report(st.session_state["bulk_results"]), 
+                    file_name="rapport_global_argos.pdf",
+                    mime="application/pdf"
+                )
 
         with t3:
             st.write("### 🔄 Filtrage Continu (Ongoing Screening)")
@@ -817,3 +853,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
