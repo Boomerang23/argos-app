@@ -614,7 +614,7 @@ if st.session_state["token"]:
         # --- CORRECTION : AJOUT DE L'ONGLET CONSULTER ---
         tabs = st.tabs(["👁️ Consulter Contenu", "📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
 
-        # --- NOUVEAU BLOC : CONSULTATION ---
+        # --- NOUVEAU BLOC : CONSULTATION & NETTOYAGE ---
         with tabs[0]:
             st.write("### 🧐 Explorer le contenu des listes")
             st.info("Vérifiez les données actuellement chargées dans votre moteur de conformité.")
@@ -637,7 +637,6 @@ if st.session_state["token"]:
                             if len(data) > 0:
                                 df_view = pd.DataFrame(data)
                                 st.success(f"✅ {len(df_view)} entrées trouvées.")
-                                # On affiche les colonnes les plus pertinentes
                                 cols_to_display = [c for c in ['id', 'name', 'list_source'] if c in df_view.columns]
                                 if cols_to_display:
                                     st.dataframe(df_view[cols_to_display], use_container_width=True)
@@ -649,7 +648,22 @@ if st.session_state["token"]:
                             st.error(f"Erreur serveur : {r.status_code}")
                     except Exception as e:
                         st.error(f"Impossible de se connecter au serveur : {e}")
-
+            
+            # --- LE BOUTON MAGIQUE ANTI-DOUBLONS EST ICI ---
+            st.markdown("---")
+            st.write("### 🧹 Maintenance de la base de données")
+            if st.button("Supprimer les doublons de la base 🗑️"):
+                with st.spinner("Opération Kärcher en cours..."):
+                    try:
+                        r_del = requests.delete(f"{API_URL}/sanctions/duplicates", headers=headers)
+                        if r_del.status_code == 200:
+                            nb_supprimes = r_del.json().get('deleted_count', 0)
+                            st.success(f"✅ Opération réussie ! {nb_supprimes} doublons ont été effacés définitivement.")
+                            log_action(st.session_state["user_email"], "NETTOYAGE_BDD", "Toutes les listes", f"{nb_supprimes} doublons purgés.")
+                        else:
+                            st.error("Erreur lors du nettoyage.")
+                    except Exception as e:
+                        st.error(f"Erreur technique : {e}")
         with tabs[1]:
             st.info("Ajouter individuellement une personne à une liste locale.")
             all_lists = get_all_lists()
@@ -880,3 +894,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
