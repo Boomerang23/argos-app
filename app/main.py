@@ -107,19 +107,29 @@ def create_or_verify_client(client: schemas.ClientCreate, db: Session = Depends(
             "details": "✅ RAS - Aucune correspondance significative"
         }
 
-# ON RETIRE le "response_model=schemas.SanctionOut" pour éviter le crash de l'ID
+# --- CORRECTION : BOUCLIER ANTI-DOUBLONS ---
 @app.post("/sanctions/")
 def add_sanction(sanction: schemas.SanctionCreate, db: Session = Depends(database.get_db)):
+    # 1. On vérifie si le nom existe déjà DANS LA MÊME LISTE
+    doublon = db.query(models.Sanction).filter(
+        models.Sanction.name == sanction.name,
+        models.Sanction.list_source == sanction.list_source
+    ).first()
+
+    if doublon:
+        # On renvoie un statut "skipped" pour que le frontend comprenne que c'est ignoré sans planter
+        return {"status": "skipped", "message": "Doublon ignoré", "name": sanction.name}
+
+    # 2. Si pas de doublon, on enregistre
     try:
         db_sanction = models.Sanction(**sanction.dict())
         db.add(db_sanction)
         db.commit()
         db.refresh(db_sanction)
-        # On renvoie un dictionnaire simple, sans passer par le schéma strict
         return {"status": "success", "name": db_sanction.name}
     except Exception as e:
         db.rollback() 
-        raise HTTPException(status_code=400, detail="Ce nom existe déjà dans la base de données ou le format est invalide.")
+        raise HTTPException(status_code=400, detail="Format invalide ou erreur base de données.")
 
 # --- AJOUT : Route pour lire le contenu d'une liste ---
 @app.get("/sanctions/view")
@@ -253,8 +263,3 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
-
-
-
-
-
