@@ -155,6 +155,28 @@ def screen_name(request: schemas.ScreeningRequest, db: Session = Depends(databas
         "risk_level": risk
     }
 
+# --- OUTIL DE NETTOYAGE DES DOUBLONS ---
+@app.delete("/sanctions/duplicates")
+def clean_duplicates(db: Session = Depends(database.get_db)):
+    """Parcourt la base de données et supprime tous les doublons exacts."""
+    sanctions = db.query(models.Sanction).all()
+    vus = set()
+    doublons_supprimes = 0
+    
+    for s in sanctions:
+        # On crée une clé unique (Nom en minuscules + Liste source)
+        cle = (s.name.strip().lower(), s.list_source)
+        
+        if cle in vus:
+            # Si on l'a déjà vu, c'est un doublon, on le supprime !
+            db.delete(s)
+            doublons_supprimes += 1
+        else:
+            # Sinon, on l'ajoute à notre mémoire
+            vus.add(cle)
+            
+    db.commit()
+    return {"status": "success", "deleted_count": doublons_supprimes}
 
 # --- ROUTES POUR L'HISTORIQUE ET LES LOGS CLOUD ---
 @app.post("/logs/")
@@ -263,3 +285,4 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
