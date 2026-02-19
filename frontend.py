@@ -293,7 +293,7 @@ with st.sidebar:
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
-    # --- AJOUT : "📖 Aide & Doc" est maintenant dans les options par défaut ---
+    # --- MENU OPTIONS ---
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes", "📖 Aide & Doc"]
     if st.session_state["role"] == "ADMIN": 
         menu_options.extend(["👥 Utilisateurs", "🔌 API & Intégrations"]) 
@@ -362,7 +362,8 @@ if st.session_state["token"]:
 
     # === VÉRIFICATIONS ===
     elif menu == "🔍 Vérifications":
-        t1, t2, t3 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)", "🔄 Filtrage Continu (Batch)"])
+        # --- AJOUT DE L'ONGLET OCR ICI ---
+        t1, t2, t3, t4 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)", "🔄 Filtrage Continu (Batch)", "📸 Scan Pièce (OCR)"])
         
         with t1:
             st.write("Scan rapide d'un individu.")
@@ -477,6 +478,67 @@ if st.session_state["token"]:
                     st.success(f"✅ Filtrage continu terminé ! **{new_alerts} alerte(s) détectée(s)** sur la base cliente.")
                     st.dataframe(df_res_batch, use_container_width=True)
                     log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Clients Existante", f"{len(unique_clients)} clients revérifiés.")
+
+        # --- ONGLET 4 : PROTOTYPE OCR (NOUVEAU) ---
+        with t4:
+            st.write("### 📸 Extraction Automatique par OCR")
+            st.info("Prenez en photo la pièce d'identité du client. L'Intelligence Artificielle extraira les informations pour vous éviter la saisie manuelle.")
+
+            uploaded_img = st.file_uploader("Uploader la CNI ou le Passeport (JPG, PNG)", type=["jpg", "jpeg", "png"])
+
+            if uploaded_img:
+                col_img, col_res = st.columns(2)
+
+                with col_img:
+                    st.image(uploaded_img, caption="Document scanné", use_container_width=True)
+
+                    if st.button("🔍 Extraire les données (OCR)"):
+                        with st.spinner("Lecture optique en cours..."):
+                            try:
+                                # Tentative d'utilisation du vrai moteur OCR
+                                from PIL import Image
+                                import pytesseract
+                                img = Image.open(uploaded_img)
+                                extracted_text = pytesseract.image_to_string(img)
+                                st.session_state["ocr_raw"] = extracted_text
+                                st.success("✅ Lecture terminée !")
+                            except Exception as e:
+                                # Mode Simulation (Si Tesseract n'est pas encore installé)
+                                st.warning("⚠️ Moteur OCR non détecté sur le serveur. Passage en Mode Simulation pour la démo.")
+                                st.session_state["ocr_raw"] = "RÉPUBLIQUE DE CÔTE D'IVOIRE\nCARTE NATIONALE D'IDENTITÉ\nNom: TOURE\nPrénom: Alpha\nNuméro: CI-987654321\nSexe: M"
+
+                with col_res:
+                    if "ocr_raw" in st.session_state:
+                        st.write("### ✍️ Validation Humaine")
+                        st.caption("Texte brut lu par la machine :")
+                        st.text_area("Copiez-collez les bonnes infos ci-dessous si besoin :", st.session_state["ocr_raw"], height=100)
+
+                        st.write("**Confirmez les données avant le Scan AML :**")
+                        # L'humain peut corriger si la machine a mal lu
+                        ocr_final_name = st.text_input("Nom Complet du client", key="ocr_name_input")
+                        ocr_final_id = st.text_input("Numéro de Pièce", key="ocr_id_input")
+
+                        if st.button("🛡️ Lancer le Scan AML sur ce profil", type="primary"):
+                            if ocr_final_name:
+                                try:
+                                    r = requests.post(f"{API_URL}/clients/", json={"full_name": ocr_final_name, "entity_type": "Physique", "national_id": ocr_final_id, "country_residence": "CI", "tenant_id": "OCR"}, headers=headers)
+                                    if r.status_code == 200:
+                                        d = r.json()
+                                        risk = d.get("risk_score")
+                                        details = d.get("details", "")
+                                        sim_score = d.get("similarity_score", 0) 
+                                        status = "ALERTE" if risk in ["ELEVE", "High"] else "CONFORME"
+                                        
+                                        if status == "ALERTE": st.error(f"{details}") 
+                                        else: st.success(f"{details}")
+                                        
+                                        pdf = create_kyc_pdf(ocr_final_name, ocr_final_id, status, details)
+                                        st.download_button("Télécharger Certificat PDF", pdf, "rapport_kyc_ocr.pdf", "application/pdf", key="dl_ocr")
+                                        save_scan(ocr_final_name, status, details)
+                                        log_action(st.session_state["user_email"], "SCAN_OCR", ocr_final_name, status)
+                                except Exception as e: st.error("Erreur serveur.")
+                            else:
+                                st.warning("Veuillez saisir un nom.")
 
     # === CENTRE D'ALERTES ===
     elif menu == "🚦 Alertes":
@@ -885,7 +947,7 @@ async function validerClientArgos() {{
 validerClientArgos();
 """, language="javascript")
 
-    # === AIDE & DOCUMENTATION (NOUVEAU MODULE) ===
+    # === AIDE & DOCUMENTATION ===
     elif menu == "📖 Aide & Doc":
         st.subheader("📖 Guide Utilisateur ARGOS 360°")
         st.write("Bienvenue dans votre centre d'assistance. Comment pouvons-nous vous aider aujourd'hui ?")
