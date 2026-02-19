@@ -257,7 +257,6 @@ st.markdown("<hr>", unsafe_allow_html=True)
 if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 if "role" not in st.session_state: st.session_state["role"] = "" 
-# --- NOUVEAU : Initialisation de la mémoire pour le scan de masse ---
 if "bulk_results" not in st.session_state: st.session_state["bulk_results"] = None
 
 with st.sidebar:
@@ -287,14 +286,15 @@ with st.sidebar:
         st.success(f"👤 {st.session_state['user_email']} ({st.session_state['role']})")
         if st.button("Se déconnecter"): 
             st.session_state["token"] = None; st.session_state["user_email"] = ""; st.session_state["role"] = ""
-            st.session_state["bulk_results"] = None # Nettoyage à la déconnexion
+            st.session_state["bulk_results"] = None 
             st.rerun()
 
 # --- APP PRINCIPALE ---
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
-    menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes"]
+    # --- AJOUT : "📖 Aide & Doc" est maintenant dans les options par défaut ---
+    menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes", "📖 Aide & Doc"]
     if st.session_state["role"] == "ADMIN": 
         menu_options.extend(["👥 Utilisateurs", "🔌 API & Intégrations"]) 
         
@@ -402,13 +402,11 @@ if st.session_state["token"]:
                         else: st.error(f"❌ Erreur Backend {r.status_code}")
                     except Exception as e: st.error(f"Erreur connexion : {e}")
         
-        # --- SECTION CORRIGÉE : SCAN DE MASSE ---
         with t2:
             st.write("Scan de liste clients (Excel/CSV).")
             
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             
-            # Si on change de fichier ou supprime le fichier, on réinitialise les résultats
             if upl is None:
                 st.session_state["bulk_results"] = None
 
@@ -428,16 +426,13 @@ if st.session_state["token"]:
                         except: res.append({"Nom": n, "ID": client_id, "Statut": "⚠️ ERREUR", "Détail": "Tech Error"})
                         bar.progress((i+1)/len(df))
                     
-                    # On stocke le résultat dans la mémoire de Streamlit
                     st.session_state["bulk_results"] = pd.DataFrame(res)
                     st.success("✅ Analyse terminée !")
 
-            # Affichage persistant : tant qu'il y a un résultat en mémoire, on l'affiche.
             if st.session_state["bulk_results"] is not None:
                 st.write("### 📊 Résultats du Scan de Masse")
                 st.dataframe(st.session_state["bulk_results"])
                 
-                # Le bouton est en dehors de la condition if st.button("Scanner Liste"), il ne fera plus tout disparaître
                 st.download_button(
                     label="📄 Télécharger Rapport PDF Global", 
                     data=create_global_report(st.session_state["bulk_results"]), 
@@ -611,10 +606,8 @@ if st.session_state["token"]:
     elif menu == "⚙️ Gestion des Listes":
         st.subheader("⚙️ Administration des Listes")
         
-        # --- CORRECTION : AJOUT DE L'ONGLET CONSULTER ---
         tabs = st.tabs(["👁️ Consulter Contenu", "📝 Entrée Manuelle", "📂 Import Fichier", "➕ Créer Liste", "🗑️ Supprimer Liste", "📜 Logs"])
 
-        # --- NOUVEAU BLOC : CONSULTATION & NETTOYAGE ---
         with tabs[0]:
             st.write("### 🧐 Explorer le contenu des listes")
             st.info("Vérifiez les données actuellement chargées dans votre moteur de conformité.")
@@ -649,7 +642,6 @@ if st.session_state["token"]:
                     except Exception as e:
                         st.error(f"Impossible de se connecter au serveur : {e}")
             
-            # --- LE BOUTON MAGIQUE ANTI-DOUBLONS EST ICI ---
             st.markdown("---")
             st.write("### 🧹 Maintenance de la base de données")
             if st.button("Supprimer les doublons de la base 🗑️"):
@@ -664,6 +656,7 @@ if st.session_state["token"]:
                             st.error("Erreur lors du nettoyage.")
                     except Exception as e:
                         st.error(f"Erreur technique : {e}")
+                        
         with tabs[1]:
             st.info("Ajouter individuellement une personne à une liste locale.")
             all_lists = get_all_lists()
@@ -788,7 +781,7 @@ if st.session_state["token"]:
                         st.rerun()
                     else: st.error("Erreur")
 
-    # === API SaaS & INTEGRATIONS (AVEC LE TEXTE CORRIGÉ) ===
+    # === API SaaS & INTEGRATIONS ===
     elif menu == "🔌 API & Intégrations":
         st.subheader("🔌 Portail Développeur (API SaaS)")
         st.write("Espace dédié aux équipes techniques. Cette documentation vous permet d'intégrer automatiquement les capacités de screening d'ARGOS 360° directement dans vos systèmes d'information (Core Banking, portails d'Onboarding, applications mobiles).")
@@ -892,6 +885,43 @@ async function validerClientArgos() {{
 validerClientArgos();
 """, language="javascript")
 
+    # === AIDE & DOCUMENTATION (NOUVEAU MODULE) ===
+    elif menu == "📖 Aide & Doc":
+        st.subheader("📖 Guide Utilisateur ARGOS 360°")
+        st.write("Bienvenue dans votre centre d'assistance. Comment pouvons-nous vous aider aujourd'hui ?")
+        
+        with st.expander("🔍 Comment vérifier un nouveau client (Scan Unitaire) ?"):
+            st.markdown("""
+            1. Allez dans l'onglet **Vérifications** > **Unitaire**.
+            2. Entrez le nom complet et l'identifiant (ex: numéro de passeport ou numéro de police).
+            3. Cliquez sur **Lancer Scan**. Le système cherchera des correspondances, même avec des fautes de frappe.
+            4. **N'oubliez pas de télécharger le Certificat PDF** généré pour l'ajouter à votre dossier client !
+            """)
+            
+        with st.expander("📂 Comment vérifier un fichier entier (Scan de Masse) ?"):
+            st.markdown("""
+            Idéal pour les audits hebdomadaires ou mensuels :
+            1. Préparez un fichier Excel (`.xlsx`) ou CSV. **Attention :** Il doit contenir une colonne nommée `Nom` ou `Name`.
+            2. Allez dans **Vérifications** > **Masse (Excel)**.
+            3. Glissez-déposez le fichier et cliquez sur **Scanner Liste**.
+            4. Un tableau récapitulatif s'affichera. Cliquez sur le bouton pour télécharger le **Rapport PDF Global**.
+            """)
+            
+        with st.expander("🚦 Comment traiter une Alerte (Case Management) ?"):
+            st.markdown("""
+            Lorsqu'un client correspond à une liste de sanctions, le dossier part dans le **Centre d'Alertes**.
+            * **Rôle AGENT :** Vous devez analyser le profil, écrire un commentaire de justification, joindre une preuve si nécessaire, et proposer une décision (*Faux Positif* ou *Confirmé*). Le dossier passera en statut `A VALIDER`.
+            * **Rôle ADMIN :** Vous êtes le Superviseur. Vous relisez le travail de l'Agent et vous validez la décision finale pour fermer le dossier de manière sécurisée.
+            * *Astuce : Vous pouvez télécharger le rapport d'investigation PDF à tout moment.*
+            """)
+            
+        with st.expander("⚙️ Comment mettre à jour nos listes de sanctions internes ?"):
+            st.markdown("""
+            Allez dans le menu **Gestion des Listes**.
+            * Utilisez l'onglet **Import Fichier** pour charger des bases complètes fournies par vos régulateurs. 
+            * *Note : Notre bouclier anti-doublons est actif. Si vous importez un fichier contenant des noms déjà présents, ils seront ignorés pour ne pas surcharger la base.*
+            * Utilisez l'onglet **Maintenance** pour nettoyer la base en cas d'erreur de manipulation.
+            """)
+
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
