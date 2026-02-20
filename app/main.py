@@ -214,12 +214,26 @@ def get_lists(db: Session = Depends(database.get_db)):
 
 @app.delete("/lists/{list_name}")
 def delete_list(list_name: str, db: Session = Depends(database.get_db)):
-    db_lst = db.query(models.CustomList).filter(models.CustomList.name == list_name).first()
-    if db_lst:
-        db.delete(db_lst)
+    try:
+        # 1. LE GRAND NETTOYAGE : Supprime tous les noms associés à cette liste dans la table Sanction
+        noms_supprimes = db.query(models.Sanction).filter(models.Sanction.list_source == list_name).delete(synchronize_session=False)
+        
+        # 2. Supprime l'étiquette de la liste dans la table CustomList
+        db_lst = db.query(models.CustomList).filter(models.CustomList.name == list_name).first()
+        if db_lst:
+            db.delete(db_lst)
+            
+        # 3. On valide toutes les suppressions d'un coup
         db.commit()
-        return {"status": "deleted"}
-    return {"status": "not found"}
+        
+        return {
+            "status": "success", 
+            "message": "Liste et noms associés supprimés avec succès.",
+            "noms_effaces": noms_supprimes
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- ROUTES UTILISATEURS ---
@@ -285,4 +299,5 @@ def update_alert(alert_id: int, update_data: schemas.AlertUpdate, db: Session = 
     
     db.commit()
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
 
