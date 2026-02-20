@@ -194,7 +194,7 @@ def create_kyc_pdf(client_name, client_id, status, risk_details, label_client="C
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360°")
+    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360")
     c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
     c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
     c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION")
@@ -270,7 +270,7 @@ def create_investigation_pdf(row_data):
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
     
-    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360°")
+    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360")
     c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Rapport Officiel d'Investigation AML/KYC")
     c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
     
@@ -317,7 +317,7 @@ def create_investigation_pdf(row_data):
     return buffer
 
 # --- TITRE ---
-st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360 🛡️</h1>", unsafe_allow_html=True)
 st.markdown("<h4 style='text-align: center;'>Système de Gestion des référentiels KYC</h4>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -929,7 +929,7 @@ if st.session_state["token"]:
     # === API SaaS & INTEGRATIONS ===
     elif menu == "🔌 API & Intégrations":
         st.subheader("🔌 Portail Développeur (API SaaS)")
-        st.write("Espace dédié aux équipes techniques. Cette documentation vous permet d'intégrer automatiquement les capacités de screening d'ARGOS 360° directement dans vos systèmes d'information (Core Banking, portails d'Onboarding, applications mobiles).")
+        st.write("Espace dédié aux équipes techniques. Cette documentation vous permet d'intégrer automatiquement les capacités de screening d'ARGOS 360 directement dans vos systèmes d'information (Core Banking, portails d'Onboarding, applications mobiles).")
         
         tabs = st.tabs(["🔑 Authentification", "📡 Endpoint KYC (Screening)", "💻 Scripts prêts à l'emploi"])
         
@@ -1032,7 +1032,7 @@ validerClientArgos();
 
     # === AIDE & DOCUMENTATION ===
     elif menu == "📖 Aide & Doc":
-        st.subheader("📖 Guide Utilisateur ARGOS 360°")
+        st.subheader("📖 Guide Utilisateur ARGOS 360")
         st.write("Bienvenue dans votre centre d'assistance. Comment pouvons-nous vous aider aujourd'hui ?")
         
         with st.expander("🔍 Comment vérifier un nouveau client (Scan Unitaire) ?"):
