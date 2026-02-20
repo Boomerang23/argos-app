@@ -479,7 +479,7 @@ if st.session_state["token"]:
                     st.dataframe(df_res_batch, use_container_width=True)
                     log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Clients Existante", f"{len(unique_clients)} clients revérifiés.")
 
-        # --- ONGLET 4 : PROTOTYPE OCR (NOUVEAU) ---
+       # --- ONGLET 4 : MOTEUR OCR RÉEL ---
         with t4:
             st.write("### 📸 Extraction Automatique par OCR")
             st.info("Prenez en photo la pièce d'identité du client. L'Intelligence Artificielle extraira les informations pour vous éviter la saisie manuelle.")
@@ -495,17 +495,25 @@ if st.session_state["token"]:
                     if st.button("🔍 Extraire les données (OCR)"):
                         with st.spinner("Lecture optique en cours..."):
                             try:
-                                # Tentative d'utilisation du vrai moteur OCR
+                                # Utilisation exclusive du vrai moteur OCR
                                 from PIL import Image
                                 import pytesseract
+                                
                                 img = Image.open(uploaded_img)
                                 extracted_text = pytesseract.image_to_string(img)
-                                st.session_state["ocr_raw"] = extracted_text
-                                st.success("✅ Lecture terminée !")
+                                
+                                # Si l'image est lue mais qu'il n'y a pas de texte
+                                if not extracted_text.strip():
+                                    st.warning("⚠️ L'image a été analysée, mais aucun texte lisible n'a été trouvé. L'image est-elle assez nette ?")
+                                else:
+                                    st.session_state["ocr_raw"] = extracted_text
+                                    st.success("✅ Lecture terminée !")
+                                    
                             except Exception as e:
-                                # Mode Simulation (Si Tesseract n'est pas encore installé)
-                                st.warning("⚠️ Moteur OCR non détecté sur le serveur. Passage en Mode Simulation pour la démo.")
-                                st.session_state["ocr_raw"] = "RÉPUBLIQUE DE CÔTE D'IVOIRE\nCARTE NATIONALE D'IDENTITÉ\nNom: TOURE\nPrénom: Alpha\nNuméro: CI-987654321\nSexe: M"
+                                # Vraie gestion d'erreur au lieu de la simulation
+                                st.error("❌ Échec critique du moteur OCR.")
+                                st.error(f"Détail de l'erreur : {e}")
+                                st.info("💡 Astuce : Vérifiez que 'tesseract-ocr' est bien installé sur le serveur via le fichier packages.txt.")
 
                 with col_res:
                     if "ocr_raw" in st.session_state:
@@ -514,7 +522,7 @@ if st.session_state["token"]:
                         st.text_area("Copiez-collez les bonnes infos ci-dessous si besoin :", st.session_state["ocr_raw"], height=100)
 
                         st.write("**Confirmez les données avant le Scan AML :**")
-                        # L'humain peut corriger si la machine a mal lu
+                        # L'humain doit remplir en se basant sur le texte brut
                         ocr_final_name = st.text_input("Nom Complet du client", key="ocr_name_input")
                         ocr_final_id = st.text_input("Numéro de Pièce", key="ocr_id_input")
 
@@ -987,3 +995,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
