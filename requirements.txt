@@ -1,3 +1,4 @@
+# --- BACKEND (FastAPI & Base de données) ---
 fastapi
 uvicorn[standard]
 sqlalchemy
@@ -5,22 +6,25 @@ psycopg2-binary
 pydantic[email]
 python-dotenv
 passlib[bcrypt]
-thefuzz
-python-Levenshtein
+bcrypt==4.0.1
 python-jose[cryptography]
 python-multipart
+
+# --- MOTEUR DE RECHERCHE IA ---
+thefuzz
+python-Levenshtein
+rapidfuzz
+
+# --- FRONTEND (Streamlit & Données) ---
 streamlit
 requests
 pandas
+openpyxl
+
+# --- VISUELS & RAPPORTS ---
 plotly
 reportlab
-bcrypt==4.0.1
-openpyxl
-psycopg2-binary
-passlib[bcrypt]
-bcrypt
-rapidfuzz
+
+# --- OCR (Scan de Pièces d'identité) ---
 Pillow
 pytesseract
-
-
