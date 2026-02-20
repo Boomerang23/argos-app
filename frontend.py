@@ -25,6 +25,12 @@ VOCAB = {
         "scan_title": "Vérification d'un client bancaire",
         "doc_name": "Dossier d'Ouverture de Compte"
     },
+    "Mobile Money & EME": {
+        "client": "Abonné / Agent Distributeur", 
+        "id": "Numéro de Téléphone (MSISDN)", 
+        "scan_title": "Vérification d'un portefeuille électronique",
+        "doc_name": "Dossier KYC Mobile"
+    },
     "Marchés Financiers (SGI, SGP, BRVM)": {
         "client": "Investisseur / Mandant", 
         "id": "Numéro de Compte Titres", 
@@ -1064,3 +1070,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
