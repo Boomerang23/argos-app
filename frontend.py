@@ -479,7 +479,7 @@ if st.session_state["token"]:
                     st.dataframe(df_res_batch, use_container_width=True)
                     log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Clients Existante", f"{len(unique_clients)} clients revérifiés.")
 
-       # --- ONGLET 4 : MOTEUR OCR RÉEL ---
+        # --- ONGLET 4 : MOTEUR OCR RÉEL ---
         with t4:
             st.write("### 📸 Extraction Automatique par OCR")
             st.info("Prenez en photo la pièce d'identité du client. L'Intelligence Artificielle extraira les informations pour vous éviter la saisie manuelle.")
@@ -995,4 +995,3 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
