@@ -19,7 +19,7 @@ st.set_page_config(page_title="ARGOS - Gestion des Risques", page_icon="🛡️"
 
 # --- DICTIONNAIRE CAMÉLÉON (BASÉ SUR LA LOI CENTIF-CI) ---
 VOCAB = {
-    "Banques & Institutions Financières": {
+     "Banques & Institutions Financières": {
         "client": "Client / Titulaire", 
         "id": "Numéro de Compte / RIB", 
         "scan_title": "Vérification d'un client bancaire",
@@ -1070,3 +1070,4 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
+
