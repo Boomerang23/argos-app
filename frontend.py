@@ -17,6 +17,70 @@ from reportlab.lib.styles import getSampleStyleSheet
 API_URL = "https://argos-backend-kovx.onrender.com"
 st.set_page_config(page_title="ARGOS - Gestion des Risques", page_icon="🛡️", layout="wide")
 
+# --- DICTIONNAIRE CAMÉLÉON (BASÉ SUR LA LOI CENTIF-CI) ---
+VOCAB = {
+    "Banques & Institutions Financières": {
+        "client": "Client / Titulaire", 
+        "id": "Numéro de Compte / RIB", 
+        "scan_title": "Vérification d'un client bancaire",
+        "doc_name": "Dossier d'Ouverture de Compte"
+    },
+    "Marchés Financiers (SGI, SGP, BRVM)": {
+        "client": "Investisseur / Mandant", 
+        "id": "Numéro de Compte Titres", 
+        "scan_title": "Vérification d'un investisseur",
+        "doc_name": "Dossier Client SGI"
+    },
+    "Assurance & Courtage": {
+        "client": "Souscripteur / Bénéficiaire", 
+        "id": "Numéro de Police d'Assurance", 
+        "scan_title": "Audit d'un assuré ou bénéficiaire",
+        "doc_name": "Dossier de Sinistre / Police"
+    },
+    "Professions Juridiques (Avocats, Notaires)": {
+        "client": "Partie au dossier / Bénéf. Effectif", 
+        "id": "Numéro de Registre / Acte", 
+        "scan_title": "Screening des parties prenantes",
+        "doc_name": "Dossier Juridique"
+    },
+    "Experts Comptables & CAC": {
+        "client": "Entreprise Auditée / Dirigeant", 
+        "id": "Numéro RCCM / SIRET", 
+        "scan_title": "Audit d'un dirigeant ou actionnaire",
+        "doc_name": "Dossier d'Audit KYC"
+    },
+    "Agents Immobiliers": {
+        "client": "Acheteur / Vendeur / Locataire", 
+        "id": "Référence Mandat / Bien", 
+        "scan_title": "Vérification d'une transaction immobilière",
+        "doc_name": "Dossier de Transaction"
+    },
+    "Casinos & Établissements de Jeux": {
+        "client": "Joueur / Gagnant", 
+        "id": "Numéro de Ticket / Transaction", 
+        "scan_title": "Contrôle d'un joueur (Gros gain)",
+        "doc_name": "Registre des Gains"
+    },
+    "Négociants (Art, Métaux & Pierres Précieuses)": {
+        "client": "Acheteur / Vendeur", 
+        "id": "Numéro de Facture / Certificat", 
+        "scan_title": "Audit d'une transaction de grande valeur",
+        "doc_name": "Dossier d'Acquisition"
+    },
+    "ONG & Associations": {
+        "client": "Donateur / Partenaire / Bénéficiaire", 
+        "id": "Référence du Don / Projet", 
+        "scan_title": "Screening d'un flux de financement",
+        "doc_name": "Dossier de Financement"
+    },
+    "Agences de Voyage": {
+        "client": "Client / Voyageur", 
+        "id": "Numéro de Réservation / PNR", 
+        "scan_title": "Vérification d'un paiement de séjour",
+        "doc_name": "Dossier de Voyage"
+    }
+}
+
 # --- CSS (Design Pro) ---
 st.markdown("""
 <style>
@@ -111,28 +175,29 @@ def update_alert_api(alert_id, data):
     except Exception as e: 
         return False, str(e)
 
-# --- FONCTIONS PDF ---
+# --- FONCTIONS PDF (MISES A JOUR POUR LE CAMÉLÉON) ---
 def clean_text_pdf(text):
-    """Nettoie les emojis pour éviter les carrés noirs dans le PDF de ReportLab"""
     if pd.isna(text): return ""
     text = str(text)
-    # Liste des emojis utilisés dans notre interface
     emojis = ["🔴", "🟢", "🟠", "🟡", "⚠️", "🚨", "✅", "📝", "🛑", "📎", "👁️", "🔒", "🛠️", "📥", "🚀", "🔄"]
     for e in emojis:
         text = text.replace(e, "")
     return text.strip()
 
-def create_kyc_pdf(client_name, client_id, status, risk_details):
+def create_kyc_pdf(client_name, client_id, status, risk_details, label_client="Client", label_id="ID"):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS")
+    c.setFont("Helvetica-Bold", 24); c.drawString(50, height - 50, "ARGOS 360°")
     c.setFont("Helvetica", 12); c.drawString(50, height - 70, "Plateforme de Conformité & KYC")
     c.setLineWidth(2); c.line(50, height - 80, width - 50, height - 80)
-    c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION KYC")
+    c.setFont("Helvetica-Bold", 18); c.drawCentredString(width / 2, height - 120, "RAPPORT DE VÉRIFICATION")
     c.setFont("Helvetica", 12)
     c.drawString(50, height - 180, f"Date : {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-    c.drawString(50, height - 210, f"Client : {clean_text_pdf(client_name)}"); c.drawString(50, height - 230, f"ID : {clean_text_pdf(client_id)}")
+    
+    # Intégration du vocabulaire Caméléon
+    c.drawString(50, height - 210, f"{label_client} : {clean_text_pdf(client_name)}")
+    c.drawString(50, height - 230, f"{label_id} : {clean_text_pdf(client_id)}")
     
     if "ALERTE" in str(status) or "ELEVE" in str(status): color = colors.red; text_status = "REJETÉ / ALERTE"
     else: color = colors.green; text_status = "VÉRIFIÉ / CONFORME"
@@ -166,20 +231,17 @@ def create_global_report(dataframe):
     elements.append(Paragraph(stats_text, styles['Normal']))
     elements.append(Spacer(1, 20))
     
-    data = [["Nom du Client", "ID National", "Statut", "Détail"]]
+    data = [["Nom Scanné", "Identifiant", "Statut", "Détail"]]
     
     for index, row in dataframe.iterrows(): 
         nom = clean_text_pdf(row.get('Nom', ''))
         id_nat = clean_text_pdf(row.get('ID', ''))
         statut = clean_text_pdf(row.get('Statut', ''))
         detail_text = clean_text_pdf(row.get('Détail', ''))
-        
         detail_paragraph = Paragraph(detail_text, styles['Normal'])
-        
         data.append([nom, id_nat, statut, detail_paragraph])
         
     table = Table(data, colWidths=[120, 80, 100, 250])
-    
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue), 
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -212,8 +274,8 @@ def create_investigation_pdf(row_data):
     c.setFont("Helvetica-Bold", 12); c.drawString(50, height - 160, "1. Détails de la Détection")
     c.setFont("Helvetica", 11)
     c.drawString(60, height - 180, f"Date de création : {clean_text_pdf(row_data.get('created_at_str', row_data.get('created_at', 'N/A')))}")
-    c.drawString(60, height - 200, f"Client Scanné : {clean_text_pdf(row_data.get('client_name', 'N/A'))}")
-    c.drawString(60, height - 220, f"Cible Détectée (Base Sanctions) : {clean_text_pdf(row_data.get('matched_name', 'N/A'))}")
+    c.drawString(60, height - 200, f"Cible Scannée : {clean_text_pdf(row_data.get('client_name', 'N/A'))}")
+    c.drawString(60, height - 220, f"Correspondance (Base Sanctions) : {clean_text_pdf(row_data.get('matched_name', 'N/A'))}")
     c.drawString(60, height - 240, f"Score de similitude IA : {row_data.get('similarity_score', 0)}%")
     c.drawString(60, height - 260, f"Délai (SLA) : {clean_text_pdf(row_data.get('SLA', 'N/A'))}")
     
@@ -258,6 +320,7 @@ if "token" not in st.session_state: st.session_state["token"] = None
 if "user_email" not in st.session_state: st.session_state["user_email"] = ""
 if "role" not in st.session_state: st.session_state["role"] = "" 
 if "bulk_results" not in st.session_state: st.session_state["bulk_results"] = None
+if "secteur" not in st.session_state: st.session_state["secteur"] = "Banques & Institutions Financières" # Par défaut
 
 with st.sidebar:
     st.title("🛡️")
@@ -284,6 +347,16 @@ with st.sidebar:
     
     else:
         st.success(f"👤 {st.session_state['user_email']} ({st.session_state['role']})")
+        
+        # --- MENU CAMÉLÉON DANS LA SIDEBAR ---
+        st.markdown("---")
+        st.session_state["secteur"] = st.selectbox(
+            "🏢 Votre Secteur d'Activité :", 
+            list(VOCAB.keys()), 
+            index=list(VOCAB.keys()).index(st.session_state["secteur"])
+        )
+        st.markdown("---")
+
         if st.button("Se déconnecter"): 
             st.session_state["token"] = None; st.session_state["user_email"] = ""; st.session_state["role"] = ""
             st.session_state["bulk_results"] = None 
@@ -293,7 +366,9 @@ with st.sidebar:
 if st.session_state["token"]:
     headers = {"Authorization": f"Bearer {st.session_state['token']}"}
     
-    # --- MENU OPTIONS ---
+    # On charge le vocabulaire actuel sélectionné
+    v = VOCAB[st.session_state["secteur"]]
+    
     menu_options = ["📊 Tableau de Bord", "🔍 Vérifications", "🚦 Alertes", "⚙️ Gestion des Listes", "📖 Aide & Doc"]
     if st.session_state["role"] == "ADMIN": 
         menu_options.extend(["👥 Utilisateurs", "🔌 API & Intégrations"]) 
@@ -360,16 +435,15 @@ if st.session_state["token"]:
         else:
             st.info("Aucune donnée disponible. Lancez un scan pour alimenter les statistiques !")
 
-    # === VÉRIFICATIONS ===
+    # === VÉRIFICATIONS (AVEC VOCABULAIRE DYNAMIQUE) ===
     elif menu == "🔍 Vérifications":
-        # --- AJOUT DE L'ONGLET OCR ICI ---
         t1, t2, t3, t4 = st.tabs(["👤 Unitaire", "📂 Masse (Excel)", "🔄 Filtrage Continu (Batch)", "📸 Scan Pièce (OCR)"])
         
         with t1:
-            st.write("Scan rapide d'un individu.")
+            st.write(f"**{v['scan_title']}**")
             col1, col2 = st.columns(2)
-            with col1: name = st.text_input("Nom Complet")
-            with col2: nid = st.text_input("ID / Matricule")
+            with col1: name = st.text_input(f"Nom du {v['client']}")
+            with col2: nid = st.text_input(f"{v['id']}")
             
             if st.button("Lancer Scan", type="primary"):
                 if name:
@@ -385,7 +459,8 @@ if st.session_state["token"]:
                                 st.write("### 📝 Rapport d'Analyse")
                                 if status == "ALERTE": st.error(f"{details}") 
                                 else: st.success(f"{details}")
-                                pdf = create_kyc_pdf(name, nid, status, details)
+                                # PDF Caméléon
+                                pdf = create_kyc_pdf(name, nid, status, details, v['client'], v['id'])
                                 st.download_button("Télécharger Rapport PDF", pdf, "rapport_kyc.pdf", "application/pdf")
                             
                             with res_col2:
@@ -404,8 +479,7 @@ if st.session_state["token"]:
                     except Exception as e: st.error(f"Erreur connexion : {e}")
         
         with t2:
-            st.write("Scan de liste clients (Excel/CSV).")
-            
+            st.write(f"Scan d'une liste de **{v['client']}s** (Excel/CSV).")
             upl = st.file_uploader("Fichier Client", type=["xlsx", "csv"])
             
             if upl is None:
@@ -433,7 +507,6 @@ if st.session_state["token"]:
             if st.session_state["bulk_results"] is not None:
                 st.write("### 📊 Résultats du Scan de Masse")
                 st.dataframe(st.session_state["bulk_results"])
-                
                 st.download_button(
                     label="📄 Télécharger Rapport PDF Global", 
                     data=create_global_report(st.session_state["bulk_results"]), 
@@ -443,15 +516,15 @@ if st.session_state["token"]:
 
         with t3:
             st.write("### 🔄 Filtrage Continu (Ongoing Screening)")
-            st.info("💡 **Conformité Réglementaire :** Cette fonction récupère la liste de tous vos clients existants et les repasse au crible des dernières listes de sanctions. C'est indispensable pour détecter si un ancien client est devenu une personne à risque hier !")
+            st.info("💡 **Conformité Réglementaire :** Cette fonction récupère la liste de tous vos clients existants et les repasse au crible des dernières listes de sanctions. C'est indispensable pour détecter si une entité est devenue une personne à risque hier !")
             
             if st.button("🚀 Lancer le Batch Screening Automatique", type="primary"):
                 df_history = load_stats()
                 if df_history.empty:
-                    st.warning("Aucun client dans la base de données historique.")
+                    st.warning("Aucun dossier dans la base de données historique.")
                 else:
                     unique_clients = df_history['client_name'].dropna().unique()
-                    st.write(f"🔄 **Lancement de l'analyse en arrière-plan sur {len(unique_clients)} clients uniques...**")
+                    st.write(f"🔄 **Lancement de l'analyse en arrière-plan sur {len(unique_clients)} entités uniques...**")
                     
                     res_batch = []
                     bar_batch = st.progress(0)
@@ -463,26 +536,25 @@ if st.session_state["token"]:
                                 d = r.json()
                                 rk = d.get("risk_score", "Low")
                                 stt = "🔴 REJETÉ" if rk in ["ELEVE", "High"] else "🟢 CONFORME"
-                                res_batch.append({"Nom Client": client_name, "Statut Actuel": stt, "Détail / Motif": d.get("details", "")})
+                                res_batch.append({"Nom / Entité": client_name, "Statut Actuel": stt, "Détail / Motif": d.get("details", "")})
                                 save_scan(str(client_name), "ALERTE" if "REJETÉ" in stt else "CONFORME", "Filtrage Continu (Batch)")
                             else:
-                                res_batch.append({"Nom Client": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": f"Code {r.status_code}"})
+                                res_batch.append({"Nom / Entité": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": f"Code {r.status_code}"})
                         except:
-                            res_batch.append({"Nom Client": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": "Erreur serveur"})
+                            res_batch.append({"Nom / Entité": client_name, "Statut Actuel": "⚠️ ERREUR", "Détail / Motif": "Erreur serveur"})
                         
                         bar_batch.progress((i+1)/len(unique_clients))
                     
                     df_res_batch = pd.DataFrame(res_batch)
                     new_alerts = len(df_res_batch[df_res_batch['Statut Actuel'].str.contains("REJETÉ")])
                     
-                    st.success(f"✅ Filtrage continu terminé ! **{new_alerts} alerte(s) détectée(s)** sur la base cliente.")
+                    st.success(f"✅ Filtrage continu terminé ! **{new_alerts} alerte(s) détectée(s)** sur la base.")
                     st.dataframe(df_res_batch, use_container_width=True)
-                    log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Clients Existante", f"{len(unique_clients)} clients revérifiés.")
+                    log_action(st.session_state["user_email"], "BATCH_SCREENING", "Base Historique Existante", f"{len(unique_clients)} entités revérifiées.")
 
-        # --- ONGLET 4 : MOTEUR OCR RÉEL ---
         with t4:
-            st.write("### 📸 Extraction Automatique par OCR")
-            st.info("Prenez en photo la pièce d'identité du client. L'Intelligence Artificielle extraira les informations pour vous éviter la saisie manuelle.")
+            st.write(f"### 📸 Extraction Automatique ({v['client']})")
+            st.info("Prenez en photo la pièce d'identité. L'Intelligence Artificielle extraira les informations pour vous éviter la saisie manuelle.")
 
             uploaded_img = st.file_uploader("Uploader la CNI ou le Passeport (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
@@ -495,14 +567,12 @@ if st.session_state["token"]:
                     if st.button("🔍 Extraire les données (OCR)"):
                         with st.spinner("Lecture optique en cours..."):
                             try:
-                                # Utilisation exclusive du vrai moteur OCR
                                 from PIL import Image
                                 import pytesseract
                                 
                                 img = Image.open(uploaded_img)
                                 extracted_text = pytesseract.image_to_string(img)
                                 
-                                # Si l'image est lue mais qu'il n'y a pas de texte
                                 if not extracted_text.strip():
                                     st.warning("⚠️ L'image a été analysée, mais aucun texte lisible n'a été trouvé. L'image est-elle assez nette ?")
                                 else:
@@ -510,7 +580,6 @@ if st.session_state["token"]:
                                     st.success("✅ Lecture terminée !")
                                     
                             except Exception as e:
-                                # Vraie gestion d'erreur au lieu de la simulation
                                 st.error("❌ Échec critique du moteur OCR.")
                                 st.error(f"Détail de l'erreur : {e}")
                                 st.info("💡 Astuce : Vérifiez que 'tesseract-ocr' est bien installé sur le serveur via le fichier packages.txt.")
@@ -522,9 +591,9 @@ if st.session_state["token"]:
                         st.text_area("Copiez-collez les bonnes infos ci-dessous si besoin :", st.session_state["ocr_raw"], height=100)
 
                         st.write("**Confirmez les données avant le Scan AML :**")
-                        # L'humain doit remplir en se basant sur le texte brut
-                        ocr_final_name = st.text_input("Nom Complet du client", key="ocr_name_input")
-                        ocr_final_id = st.text_input("Numéro de Pièce", key="ocr_id_input")
+                        # Labels adaptatifs pour l'OCR
+                        ocr_final_name = st.text_input(f"Nom du {v['client']}", key="ocr_name_input")
+                        ocr_final_id = st.text_input(f"{v['id']}", key="ocr_id_input")
 
                         if st.button("🛡️ Lancer le Scan AML sur ce profil", type="primary"):
                             if ocr_final_name:
@@ -540,7 +609,7 @@ if st.session_state["token"]:
                                         if status == "ALERTE": st.error(f"{details}") 
                                         else: st.success(f"{details}")
                                         
-                                        pdf = create_kyc_pdf(ocr_final_name, ocr_final_id, status, details)
+                                        pdf = create_kyc_pdf(ocr_final_name, ocr_final_id, status, details, v['client'], v['id'])
                                         st.download_button("Télécharger Certificat PDF", pdf, "rapport_kyc_ocr.pdf", "application/pdf", key="dl_ocr")
                                         save_scan(ocr_final_name, status, details)
                                         log_action(st.session_state["user_email"], "SCAN_OCR", ocr_final_name, status)
@@ -591,8 +660,8 @@ if st.session_state["token"]:
                     elif "Attention" in row['SLA']: st.warning(f"**Délai de traitement (SLA) : {row['SLA']}**")
                     else: st.success(f"**Délai de traitement (SLA) : {row['SLA']}**")
 
-                    st.write(f"**Priorité IA :** {row['Priorité']}"); st.write(f"**Client scanné :** {row['client_name']}")
-                    st.write(f"**Cible détectée :** {row['matched_name']}"); st.write(f"**Score de similitude :** {row['similarity_score']}%")
+                    st.write(f"**Priorité IA :** {row['Priorité']}"); st.write(f"**Cible scannée :** {row['client_name']}")
+                    st.write(f"**Correspondance détectée :** {row['matched_name']}"); st.write(f"**Score de similitude :** {row['similarity_score']}%")
                     st.write(f"**Date d'ouverture :** {row.get('created_at_str', 'N/A')}"); st.write(f"**Assigné à :** {row.get('assigned_to', 'Non assigné')}")
                     st.info(f"**Statut actuel :** {row['status']}")
                     st.markdown("---")
