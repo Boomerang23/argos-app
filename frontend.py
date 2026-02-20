@@ -87,12 +87,94 @@ VOCAB = {
     }
 }
 
-# --- CSS (Design Pro) ---
+# --- CSS (Design Pro & Premium SaaS) ---
 st.markdown("""
 <style>
-    .main-header {font-size: 30px; font-weight: bold; color: #4B4B4B; text-align: center; margin-bottom: 20px;}
-    .stAlert {box-shadow: 2px 2px 5px rgba(0,0,0,0.1);}
-    div[data-testid="stMetricValue"] {font-size: 24px;}
+    /* Importation d'une police moderne (Inter) typique des SaaS pro */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Fond de l'application légèrement gris pour faire ressortir les éléments blancs */
+    .stApp {
+        background-color: #f8fafc;
+    }
+
+    /* Design de la barre latérale (Sidebar) - Style "Dark Mode" élégant */
+    [data-testid="stSidebar"] {
+        background-color: #0f172a;
+        color: white;
+        border-right: none;
+    }
+    [data-testid="stSidebar"] * {
+        color: #e2e8f0; /* Texte gris clair pour ne pas agresser les yeux */
+    }
+
+    /* Cartes de statistiques (Les KPI) avec ombres et bordures */
+    div[data-testid="stMetric"] {
+        background-color: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        border-left: 5px solid #2563eb; /* Petite bande bleue sur le côté */
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 28px;
+        font-weight: 800;
+        color: #1e293b;
+    }
+
+    /* Boutons ultra-modernes (Gradient Bleu) */
+    .stButton > button {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 10px 24px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px); /* Effet de soulèvement au survol */
+        box-shadow: 0 6px 12px rgba(37, 99, 235, 0.3);
+        color: white;
+    }
+
+    /* Champs de texte (Inputs) épurés */
+    .stTextInput>div>div>input {
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+        padding: 12px;
+        background-color: white;
+    }
+    .stTextInput>div>div>input:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 1px #2563eb;
+    }
+
+    /* Nettoyage : On cache le logo Streamlit en haut à droite et en bas */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Titre Principal (Header) */
+    .main-header {
+        font-size: 38px;
+        font-weight: 800;
+        color: #0f172a;
+        text-align: center;
+        margin-bottom: 5px;
+        letter-spacing: -1px;
+    }
+    .sub-header {
+        font-size: 18px;
+        color: #64748b;
+        text-align: center;
+        margin-bottom: 30px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,7 +263,7 @@ def update_alert_api(alert_id, data):
     except Exception as e: 
         return False, str(e)
 
-# --- FONCTIONS PDF (MISES A JOUR POUR LE CAMÉLÉON) ---
+# --- FONCTIONS PDF ---
 def clean_text_pdf(text):
     if pd.isna(text): return ""
     text = str(text)
@@ -317,8 +399,8 @@ def create_investigation_pdf(row_data):
     return buffer
 
 # --- TITRE ---
-st.markdown("<h1 style='text-align: center;'>🛡️ ARGOS 360° 🛡️</h1>", unsafe_allow_html=True)
-st.markdown("<h4 style='text-align: center;'>Système de Gestion des référentiels KYC</h4>", unsafe_allow_html=True)
+st.markdown("<div class='main-header'>🛡️ ARGOS 360°</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-header'>Plateforme Intelligente de Conformité & LCB-FT</div>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
 # --- LOGIN & VARIABLES DE SESSION ---
@@ -1070,4 +1152,3 @@ validerClientArgos();
 
 else:
     st.info("👈 Veuillez vous connecter via le menu à gauche.")
-
