@@ -1,23 +1,25 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
-from uuid import UUID
+
 
 # --- AUTH & JETONS ---
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 # --- USER SCHEMAS (Gestion des accès) ---
 class UserCreate(BaseModel):
-    email: str
+    email: EmailStr
     password: str
     full_name: str
     role: str = "AGENT"
 
+
 class UserOut(BaseModel):
     id: int
-    email: str
+    email: EmailStr
     full_name: str
     role: str
     is_active: bool
@@ -25,69 +27,81 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
+
 # --- CLIENT SCHEMAS (KYC) ---
 class ClientCreate(BaseModel):
     full_name: str
-    entity_type: str = "Physique" # 'Physique' ou 'Morale'
+    entity_type: str = "Physique"  # 'Physique' ou 'Morale'
     national_id: str
-    country_residence: str = "Côte d'Ivoire"
+    country_residence: str = "UNKNOWN"
     tenant_id: Optional[str] = "MANUAL"
 
+
 class ClientOut(ClientCreate):
-    id: int
+    id: str  # UUID stocké en string en DB
     risk_score: str
+
     class Config:
         from_attributes = True
 
-# --- SCREENING SCHEMAS (IA & Recherche floue) ---
+
+# --- SCREENING SCHEMAS ---
 class ScreeningRequest(BaseModel):
     name: str
+
 
 class ScreeningResult(BaseModel):
     input_name: str
     matches: List[dict]
     risk_level: str
 
-# --- SANCTION SCHEMAS (Listes Noires) ---
+
+# --- SANCTION SCHEMAS ---
 class SanctionCreate(BaseModel):
     name: str
     list_source: str = "MANUAL"
 
+
 class SanctionOut(BaseModel):
-    id: int
+    id: str  # UUID stocké en string en DB
     name: str
     list_source: str
+
     class Config:
         from_attributes = True
 
-# --- ALERT SCHEMAS (Gestion des dossiers/Tickets) ---
+
+# --- ALERT SCHEMAS ---
 class AlertOut(BaseModel):
     id: int
     client_name: str
     matched_name: str
     similarity_score: float
     status: str
-    decision: Optional[str] = None    # <-- Ajout de = None
-    comments: Optional[str] = None    # <-- Ajout de = None
-    assigned_to: Optional[str] = None # <-- Ajout de = None
+    decision: Optional[str] = None
+    comments: Optional[str] = None
+    assigned_to: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
+
 class AlertUpdate(BaseModel):
-    status: Optional[str] = None      # <-- Ajout de = None
-    decision: Optional[str] = None    # <-- Ajout de = None
-    comments: Optional[str] = None    # <-- Ajout de = None
-    assigned_to: Optional[str] = None # <-- Ajout de = None
+    status: Optional[str] = None
+    decision: Optional[str] = None
+    comments: Optional[str] = None
+    assigned_to: Optional[str] = None
+
 
 # --- LOGS & AUDIT SCHEMAS ---
 class AuditLogCreate(BaseModel):
     timestamp: str
-    user_email: str
+    user_email: EmailStr
     action: str
     target: str
     details: str
+
 
 class ScanHistoryCreate(BaseModel):
     date: str
@@ -95,6 +109,42 @@ class ScanHistoryCreate(BaseModel):
     status: str
     details: str
 
+
 class CustomListCreate(BaseModel):
     name: str
 
+
+# --- ONBOARDING SAAS (SUPER_ADMIN) ---
+class OrganizationCreate(BaseModel):
+    name: str
+
+
+class OrganizationOut(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TenantAdminCreate(BaseModel):
+    organization_id: int
+    admin_email: EmailStr
+    password: str
+    full_name: str
+
+
+# --- Pydantic v2: rebuild schemas for OpenAPI ---
+OrganizationCreate.model_rebuild()
+OrganizationOut.model_rebuild()
+TenantAdminCreate.model_rebuild()
+UserCreate.model_rebuild()
+UserOut.model_rebuild()
+AuditLogCreate.model_rebuild()
+
+class OrgUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    role: str = "AGENT"  # "ADMIN" ou "AGENT"

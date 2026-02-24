@@ -1,8 +1,9 @@
+# app/auth.py
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-# Hotfix bcrypt 
+# Hotfix bcrypt (si ton env en a besoin)
 import bcrypt  # noqa: F401
 bcrypt.__about__ = type("type", (object,), {"__version__": bcrypt.__version__})
 
@@ -14,12 +15,14 @@ from sqlalchemy.orm import Session
 
 from . import models, database
 
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY missing. Set it in environment (.env locally or host vars).")
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -70,3 +73,21 @@ def get_current_user(
         raise cred_exc
 
     return user
+
+
+# --- RBAC helpers ---
+def require_super_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
+    if current_user.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin required")
+    return current_user
+
+def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
+    if current_user.role != "ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin required")
+    return current_user
+
+
+def require_agent_or_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
+    if current_user.role not in {"ADMIN", "AGENT"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
+    return current_user

@@ -1,36 +1,86 @@
+# app/services.py
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from thefuzz import process, fuzz
+
 from . import models
 
+
 class ScreeningService:
-    def check_name(self, db: Session, name: str, threshold: int = 80):
+    def check_name(
+        self,
+        db: Session,
+        name: str,
+        organization_id: int,
+        threshold: int = 80,
+        limit: int = 3,
+    ):
         """
-        Vérifie un nom par rapport à la base de données PostgreSQL avec thefuzz.
-        Utilise token_set_ratio pour gérer les prénoms composés ou manquants.
+        Compare 'name' aux sanctions du tenant (organization_id).
+        token_set_ratio gère les prénoms inversés / composés.
+        Retourne les matchs >= threshold.
         """
-        # 1. On récupère TOUS les profils de la table Sanctions
-        sanctions_query = db.query(models.Sanction).all()
-        
-        # Si la liste est vide, on arrête tout de suite
-        if not sanctions_query:
+        sanctions = (
+            db.query(models.Sanction)
+            .filter(models.Sanction.organization_id == organization_id)
+            .all()
+        )
+
+        if not sanctions:
             return []
-            
-        # On crée un dictionnaire pour se souvenir de la source de chaque nom
-        sanctions_dict = {s.name: getattr(s, 'list_source', 'Liste de Surveillance') for s in sanctions_query}
+
+        # mapping nom -> source
+        sanctions_dict = {
+            s.name: (s.list_source or "MANUAL") for s in sanctions
+        }
         db_names = list(sanctions_dict.keys())
-        
-        # 2. On compare le nom d'entrée avec la liste de la DB
-        # --- CORRECTION MAJEURE ICI (token_set_ratio au lieu de token_sort_ratio) ---
-        matches = process.extract(name, db_names, scorer=fuzz.token_set_ratio, limit=3)
-        
+
+        matches = process.extract(
+            name,
+            db_names,
+            scorer=fuzz.token_set_ratio,
+            limit=limit,
+        )
+
         results = []
         for match_name, score in matches:
             if score >= threshold:
-                results.append({
-                    "matched_name": match_name,
-                    "score": round(score, 2),
-                    "list_source": sanctions_dict[match_name], # On récupère la vraie source !
-                    "alert": True
-                })
-        
+                results.append(
+                    {
+                        "matched_name": match_name,
+                        "score": round(float(score), 2),
+                        "list_source": sanctions_dict[match_name],
+                        "alert": True,
+                    }
+                )
+
         return results
+
+
+def log_action(
+    db: Session,
+    user: models.User,
+    action: str,
+    target: str = "",
+    details: str = "",
+) -> None:
+    """
+    Audit log.
+    - Tenant logs: organization_id=user.organization_id
+    - Platform logs (SUPER_ADMIN global): organization_id=None autorisé
+
+    IMPORTANT:  la colonne audit_logs.organization_id est nullable en DB
+    si on veut logger les actions super admin.
+    """
+    db_log = models.AuditLog(
+        organization_id=user.organization_id,  # None possible pour SUPER_ADMIN
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        user_email=user.email,
+        action=action,
+        target=target,
+        details=details,
+    )
+    db.add(db_log)
+    db.commit()

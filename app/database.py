@@ -1,24 +1,35 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# 1. On cherche l'URL secrète de Render. Si on ne la trouve pas, on utilise SQLite par défaut.
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sql_app.db")
+# 1. URL base de données (Render / Neon / Local)
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///./argos_local.db"
+)
 
-# 2. Configuration du "Moteur" en fonction de la base trouvée
+# 2. Configuration moteur
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    # Configuration spéciale pour SQLite
     engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False}
     )
 else:
-    # Configuration pour PostgreSQL (Neon)
-    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+    )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()
