@@ -1,29 +1,31 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, Depends, HTTPException, status
+import os
+from datetime import datetime
+
+from fastapi import FastAPI, Depends, HTTPException, status, Response, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+from sqlalchemy.exc import IntegrityError
 
 from . import models, schemas, database, auth
-from .auth import create_access_token
 from .database import SessionLocal, engine
 from .services import ScreeningService, log_action
-from sqlalchemy.exc import IntegrityError
-from datetime import datetime
+from jose import jwt
+from .auth import SECRET_KEY, ALGORITHM
+
 
 # --- PASSWORD HASHING ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
-
 
 
 models.Base.metadata.create_all(bind=database.engine)
@@ -31,8 +33,133 @@ models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(
     title="ARGOS 360 - Compliance Platform",
     description="Enterprise AML/KYC compliance platform",
-    version="1.0.0",
+    version="2.0.0",
 )
+
+# ---------------------------
+# CORS (OBLIGATOIRE POUR COOKIE)
+# ---------------------------
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000",
+    "http://127.0.0.1:3000",],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------
+# JWT Cookie Config
+# ---------------------------
+REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "argos_refresh")
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax")
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN")  # ex ".argos360.com" en prod
+
+# ---------------------------
+# AUTH ENDPOINTS (JWT + Refresh Cookie)
+# ---------------------------
+@app.post("/api/v1/auth/login")
+def login_api(
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(database.get_db),
+):
+    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identifiants incorrects")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Compte désactivé")
+
+    access_token = auth.create_access_token(
+        subject=str(user.id),
+        extra_claims={
+            "role": user.role,
+            "organization_id": user.organization_id,
+            "email": user.email,
+        },
+    )
+
+    refresh_token = auth.create_refresh_token(
+        subject=str(user.id),
+        extra_claims={"organization_id": user.organization_id},
+    )
+
+    # ✅ pour debug local : mets path="/" pour voir le cookie partout
+    # ensuite on resserre à "/api/v1/auth/refresh"
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        domain=COOKIE_DOMAIN,
+        path="/api/v1/auth/refresh",  # DEBUG: visible dans DevTools; on resserre après
+        max_age=60 * 60 * 24 * REFRESH_TOKEN_EXPIRE_DAYS,
+    )
+
+    return {"access_token": access_token, "token_type": "bearer", "role": user.role}
+
+
+@app.post("/api/v1/auth/refresh")
+def refresh_api(request: Request, db: Session = Depends(database.get_db)):
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing refresh cookie")
+
+    payload = auth.decode_refresh_token(token)
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    user = db.query(models.User).filter(models.User.id == int(sub)).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    access_token = auth.create_access_token(
+        subject=str(user.id),
+        extra_claims={
+            "role": user.role,
+            "organization_id": user.organization_id,  # ✅ depuis DB
+            "email": user.email,
+        },
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/v1/auth/logout")
+def logout_api(response: Response):
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path="/",
+        domain=COOKIE_DOMAIN,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/v1/auth/me")
+def me_api(current_user: models.User = Depends(auth.get_current_user)):
+    return {
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "role": current_user.role,
+            "is_active": current_user.is_active,
+        },
+        "organization": {
+            "id": current_user.organization_id,
+        },
+    }
+
+@app.get("/")
+def read_root():
+    return {"status": "active", "system": "ARGOS 360", "mode": "enterprise"}
+
 
 @app.get("/me")
 def me(current_user: models.User = Depends(auth.get_current_user)):
@@ -43,7 +170,6 @@ def me(current_user: models.User = Depends(auth.get_current_user)):
         "organization_id": current_user.organization_id,
         "is_active": current_user.is_active,
     }
-
 @app.get("/organizations/", response_model=list[schemas.OrganizationOut])
 def list_organizations(
     db: Session = Depends(database.get_db),
@@ -109,6 +235,7 @@ def create_tenant_admin(
 
     return {"status": "success", "org_id": org.id, "admin_email": user.email}
 
+
 @app.get("/organizations/{org_id}/users", response_model=list[schemas.UserOut])
 def list_org_users(
     org_id: int,
@@ -138,12 +265,10 @@ def create_org_user(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # sécurité: interdire création SUPER_ADMIN via API
     role = (payload.role or "AGENT").upper()
     if role not in {"ADMIN", "AGENT"}:
         raise HTTPException(status_code=400, detail="role must be ADMIN or AGENT")
 
-    # email unique global
     exists = db.query(models.User).filter(models.User.email == payload.email).first()
     if exists:
         raise HTTPException(status_code=400, detail="Cet email existe déjà (global).")
@@ -180,45 +305,20 @@ def create_org_user(
 
     return user
 
-@app.get("/")
-def read_root():
-    return {"status": "active", "system": "ARGOS 360", "mode": "enterprise"}
-
-
-# --- AUTH / TOKEN ---
-@app.post("/token")
-def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(database.get_db),
-):
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
-
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identifiants incorrects")
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Compte désactivé")
-
-    access_token = create_access_token(
-        subject=user.email,
-        extra_claims={
-            "role": user.role,
-            "user_id": user.id,
-            "organization_id": user.organization_id,
-        },
-    )
-
-    return {"access_token": access_token, "token_type": "bearer", "role": user.role}
-
 
 # --- CLIENTS (TENANT-SCOPED) ---
 @app.post("/clients/")
 def create_or_verify_client(
     client: schemas.ClientCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.require_agent_or_admin),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
-    # chercher uniquement dans le tenant
+    #  Bloquer SUPER_ADMIN sans organisation
+    if current_user.organization_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Super admin must select an organization before creating clients."
+        )
     db_client = (
         db.query(models.Client)
         .filter(
@@ -243,22 +343,18 @@ def create_or_verify_client(
     db.commit()
     db.refresh(db_client)
 
-    # screening
     screening_service = ScreeningService()
-    matches = screening_service.check_name(db, client.full_name,
-    organization_id=current_user.organization_id)
+    matches = screening_service.check_name(db, client.full_name, organization_id=current_user.organization_id)
 
     db_hist = models.ScanHistory(
-    organization_id=current_user.organization_id,
-    date=datetime.utcnow().isoformat(),
-    client_name=client.full_name,
-    status="MATCH" if matches else "CLEAR",
-    details="MATCH_FOUND" if matches else "NO_MATCH",
+        organization_id=current_user.organization_id,
+        date=datetime.utcnow().isoformat(),
+        client_name=client.full_name,
+        status="MATCH" if matches else "CLEAR",
+        details="MATCH_FOUND" if matches else "NO_MATCH",
     )
     db.add(db_hist)
     db.commit()
-
-
 
     log_action(
         db,
@@ -313,8 +409,29 @@ def create_or_verify_client(
         "details": "✅ RAS - Aucune correspondance significative",
     }
 
+@app.get("/clients/")
+def list_clients(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.require_agent_or_admin),
+):
+    rows = (
+        db.query(models.Client)
+        .filter(models.Client.organization_id == current_user.organization_id)
+        .order_by(models.Client.created_at.desc())
+        .all()
+    )
 
-# --- SANCTIONS (AGENT + ADMIN) (TENANT-SCOPED) ---
+    return [
+        {
+            "id": c.id,
+            "full_name": c.full_name,
+            "national_id": c.national_id,
+            "risk_score": c.risk_score,
+        }
+        for c in rows
+    ]
+
+# --- SANCTIONS ---
 @app.post("/sanctions/")
 def add_sanction(
     sanction: schemas.SanctionCreate,
@@ -369,7 +486,7 @@ def get_sanctions_by_list(
     )
 
 
-# --- SCREENING CHECK (TENANT-SCOPED sanctions inside service; still logs per tenant) ---
+# --- SCREENING CHECK ---
 @app.post("/screening/check", response_model=schemas.ScreeningResult)
 def screen_name(
     request: schemas.ScreeningRequest,
@@ -377,8 +494,7 @@ def screen_name(
     current_user: models.User = Depends(auth.require_agent_or_admin),
 ):
     service = ScreeningService()
-    matches = service.check_name(db, request.name,
-    organization_id=current_user.organization_id)
+    matches = service.check_name(db, request.name, organization_id=current_user.organization_id)
 
     risk = "FAIBLE"
     if matches:
@@ -395,7 +511,7 @@ def screen_name(
     return {"input_name": request.name, "matches": matches, "risk_level": risk}
 
 
-# --- ADMIN: SANCTIONS DEDUP (TENANT-SCOPED) ---
+# --- ADMIN: SANCTIONS DEDUP ---
 @app.delete("/sanctions/duplicates")
 def clean_duplicates(
     db: Session = Depends(database.get_db),
@@ -431,7 +547,7 @@ def clean_duplicates(
     return {"status": "success", "deleted_count": doublons_supprimes}
 
 
-# --- LOGS (TENANT-SCOPED) ---
+# --- LOGS ---
 @app.get("/logs/")
 def get_logs(
     db: Session = Depends(database.get_db),
@@ -445,7 +561,7 @@ def get_logs(
     )
 
 
-# --- HISTORY (left as-is; optional to tenant-scope later) ---
+# --- HISTORY ---
 @app.get("/history/")
 def get_history(
     db: Session = Depends(database.get_db),
@@ -459,7 +575,7 @@ def get_history(
     )
 
 
-# --- LISTS (TENANT-SCOPED) ---
+# --- LISTS ---
 @app.post("/lists/")
 def create_list(
     lst: schemas.CustomListCreate,
@@ -484,14 +600,7 @@ def create_list(
     db.add(db_lst)
     db.commit()
 
-    log_action(
-        db,
-        current_user,
-        action="LIST_CREATE",
-        target=lst.name,
-        details="",
-    )
-
+    log_action(db, current_user, action="LIST_CREATE", target=lst.name, details="")
     return {"status": "ok"}
 
 
@@ -514,7 +623,6 @@ def delete_list(
     current_user: models.User = Depends(auth.require_admin),
 ):
     try:
-        # delete sanctions for this org + list
         noms_supprimes = (
             db.query(models.Sanction)
             .filter(
@@ -555,14 +663,13 @@ def delete_list(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- USERS (ADMIN ONLY; tenant-scoped) ---
+# --- USERS (ADMIN ONLY) ---
 @app.post("/users/", response_model=schemas.UserOut)
 def create_user(
     user: schemas.UserCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.require_admin),
 ):
-    # ✅ check GLOBAL (car email est unique globalement en DB)
     existing = db.query(models.User).filter(models.User.email == user.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Cet email existe déjà (global).")
@@ -589,15 +696,9 @@ def create_user(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-    log_action(
-        db,
-        current_user,
-        action="USER_CREATE",
-        target=new_user.email,
-        details=f"role={new_user.role}",
-    )
-
+    log_action(db, current_user, action="USER_CREATE", target=new_user.email, details=f"role={new_user.role}")
     return new_user
+
 
 @app.get("/users/")
 def get_users(
@@ -611,45 +712,7 @@ def get_users(
     )
 
 
-# --- STARTUP: create Default Org + Admin ---
-@app.on_event("startup")
-def create_admin_user():
-    db = SessionLocal()
-    models.Base.metadata.create_all(bind=engine)
-
-    # 1) Créer / garantir l'existence de Default Org
-    org = db.query(models.Organization).filter(models.Organization.name == "Default Org").first()
-    if not org:
-        org = models.Organization(name="Default Org")
-        db.add(org)
-        db.commit()
-        db.refresh(org)
-
-    # 2) Créer / garantir l'existence du compte plateforme (SUPER_ADMIN global)
-    user = db.query(models.User).filter(models.User.email == "admin@sgi.ci").first()
-
-    if not user:
-        hashed_password = get_password_hash("admin")
-        user = models.User(
-            organization_id=None,  # ✅ GLOBAL
-            email="admin@sgi.ci",
-            hashed_password=hashed_password,
-            full_name="Super Administrateur",
-            role="SUPER_ADMIN",
-            is_active=True,
-        )
-        db.add(user)
-        db.commit()
-    else:
-        # ✅ Si déjà existant, on force le mode plateforme
-        user.role = "SUPER_ADMIN"
-        user.organization_id = None
-        user.is_active = True
-        db.commit()
-
-    db.close()
-
-# --- ALERTS (TENANT-SCOPED + Maker/Checker) ---
+# --- ALERTS ---
 @app.get("/alerts/", response_model=list[schemas.AlertOut])
 def get_alerts(
     db: Session = Depends(database.get_db),
@@ -683,16 +746,22 @@ def update_alert(
 
     is_admin = current_user.role == "ADMIN"
 
-    # AGENT: interdit de décider + interdit de fermer
     if not is_admin:
         if getattr(update_data, "decision", None) is not None:
             raise HTTPException(status_code=403, detail="Admin required to set decision")
-
         if getattr(update_data, "status", None) in {"FERME", "CLOSED"}:
             raise HTTPException(status_code=403, detail="Admin required to close alerts")
 
     for var, value in update_data.dict(exclude_unset=True).items():
         setattr(db_alert, var, value)
+
+    # si on ferme l'alerte => on set closed_at
+    if "status" in update_data.dict(exclude_unset=True):
+        new_status = (update_data.status or "").upper()
+        if new_status in {"FERME", "CLOSED"}:
+            db_alert.closed_at = datetime.utcnow()
+    else:
+        db_alert.closed_at = None
 
     db.commit()
 
@@ -705,3 +774,39 @@ def update_alert(
     )
 
     return {"status": "success", "message": f"Alerte {alert_id} mise à jour"}
+
+
+# --- STARTUP: create Default Org + Super Admin ---
+@app.on_event("startup")
+def create_admin_user():
+    db = SessionLocal()
+    models.Base.metadata.create_all(bind=engine)
+
+    org = db.query(models.Organization).filter(models.Organization.name == "Default Org").first()
+    if not org:
+        org = models.Organization(name="Default Org")
+        db.add(org)
+        db.commit()
+        db.refresh(org)
+
+    user = db.query(models.User).filter(models.User.email == "admin@sgi.ci").first()
+
+    if not user:
+        hashed_password = get_password_hash("admin")
+        user = models.User(
+            organization_id=None,
+            email="admin@sgi.ci",
+            hashed_password=hashed_password,
+            full_name="Super Administrateur",
+            role="SUPER_ADMIN",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+    else:
+        user.role = "SUPER_ADMIN"
+        user.organization_id = None
+        user.is_active = True
+        db.commit()
+
+    db.close()
