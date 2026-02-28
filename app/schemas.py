@@ -80,8 +80,15 @@ class AlertOut(BaseModel):
     status: str
     decision: Optional[str] = None
     comments: Optional[str] = None
+
+    # ✅ Nouveau (assignment propre)
+    assigned_user_id: Optional[int] = None
+
+    # 🔒 Legacy (on garde temporairement)
     assigned_to: Optional[str] = None
+
     created_at: datetime
+    closed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -91,6 +98,11 @@ class AlertUpdate(BaseModel):
     status: Optional[str] = None
     decision: Optional[str] = None
     comments: Optional[str] = None
+
+    # ✅ Nouveau
+    assigned_user_id: Optional[int] = None
+
+    # 🔒 Legacy
     assigned_to: Optional[str] = None
 
 
@@ -135,6 +147,27 @@ class TenantAdminCreate(BaseModel):
     full_name: str
 
 
+class OrgUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    role: str = "AGENT"  # "ADMIN" ou "AGENT"
+
+
+# --- ALERT EVENTS (TIMELINE) ---
+class AlertEventOut(BaseModel):
+    id: int
+    alert_id: int
+    user_email: str
+    event_type: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # --- Pydantic v2: rebuild schemas for OpenAPI ---
 OrganizationCreate.model_rebuild()
 OrganizationOut.model_rebuild()
@@ -142,9 +175,11 @@ TenantAdminCreate.model_rebuild()
 UserCreate.model_rebuild()
 UserOut.model_rebuild()
 AuditLogCreate.model_rebuild()
-
-class OrgUserCreate(BaseModel):
-    email: EmailStr
-    password: str
-    full_name: str
-    role: str = "AGENT"  # "ADMIN" ou "AGENT"
+ClientCreate.model_rebuild()
+ClientOut.model_rebuild()
+SanctionCreate.model_rebuild()
+SanctionOut.model_rebuild()
+AlertOut.model_rebuild()
+AlertUpdate.model_rebuild()
+OrgUserCreate.model_rebuild()
+AlertEventOut.model_rebuild()

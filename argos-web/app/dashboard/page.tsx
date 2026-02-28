@@ -17,14 +17,21 @@ export default function DashboardPage() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Tenant KPIs
   const [kpiClients, setKpiClients] = useState<number>(0);
   const [kpiAlertsOpen, setKpiAlertsOpen] = useState<number>(0);
   const [kpiScans, setKpiScans] = useState<number>(0);
 
+  // Platform KPIs (SUPER_ADMIN)
+  const [kpiOrgs, setKpiOrgs] = useState<number>(0);
+  const [kpiUsers, setKpiUsers] = useState<number>(0);
+
   async function logout() {
-    await fetch(`${API_BASE}/api/v1/auth/logout`, { method: "POST", credentials: "include" }).catch(
-      () => null
-    );
+    await fetch(`${API_BASE}/api/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => null);
+
     setAccessToken(null);
     window.location.href = "/login";
   }
@@ -34,6 +41,7 @@ export default function DashboardPage() {
       try {
         let token = getAccessToken();
 
+        // 1) Ensure access token
         if (!token) {
           const r = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
             method: "POST",
@@ -50,9 +58,14 @@ export default function DashboardPage() {
           setAccessToken(token);
         }
 
+        const headers: Record<string, string> = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+
+        // 2) Load /me
         const meRes = await fetch(`${API_BASE}/api/v1/auth/me`, {
           method: "GET",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          headers,
           credentials: "include",
         });
 
@@ -64,13 +77,54 @@ export default function DashboardPage() {
         const meData = (await meRes.json()) as MeResponse;
         setMe(meData);
 
-        // ✅ KPIs tenant only
-        if (meData?.user?.role !== "SUPER_ADMIN") {
-         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        // 3) KPIs depending on role
+        if (meData?.user?.role === "SUPER_ADMIN") {
+          // Platform KPIs: organizations + total users across orgs
+          const oRes = await fetch(`${API_BASE}/api/v1/organizations/`, {
+            method: "GET",
+            headers,
+            credentials: "include",
+          });
+
+          if (oRes.ok) {
+            const orgs = await oRes.json();
+            setKpiOrgs(Array.isArray(orgs) ? orgs.length : 0);
+
+            let totalUsers = 0;
+
+            if (Array.isArray(orgs)) {
+              await Promise.all(
+                orgs.map(async (org: any) => {
+                  const id = org?.id;
+                  if (!id) return;
+
+                  const uRes = await fetch(`${API_BASE}/api/v1/organizations/${id}/users`, {
+                    method: "GET",
+                    headers,
+                    credentials: "include",
+                  });
+
+                  if (!uRes.ok) return;
+
+                  const users = await uRes.json();
+                  totalUsers += Array.isArray(users) ? users.length : 0;
+                })
+              );
+            }
+
+            setKpiUsers(totalUsers);
+          }
+
+          // On laisse les KPIs tenant à 0/— (pas utilisés côté SUPER_ADMIN)
+          setKpiClients(0);
+          setKpiAlertsOpen(0);
+          setKpiScans(0);
+        } else {
+          // Tenant KPIs: clients + open alerts + scan history
           const [cRes, aRes, hRes] = await Promise.all([
-            fetch(`${API_BASE}/clients/`, { method: "GET", headers, credentials: "include" }),
-            fetch(`${API_BASE}/alerts/`, { method: "GET", headers, credentials: "include" }),
-            fetch(`${API_BASE}/history/`, { method: "GET", headers, credentials: "include" }),
+            fetch(`${API_BASE}/api/v1/clients/`, { method: "GET", headers, credentials: "include" }),
+            fetch(`${API_BASE}/api/v1/alerts/`, { method: "GET", headers, credentials: "include" }),
+            fetch(`${API_BASE}/api/v1/history/`, { method: "GET", headers, credentials: "include" }),
           ]);
 
           if (cRes.ok) {
@@ -90,6 +144,10 @@ export default function DashboardPage() {
             const h = await hRes.json();
             setKpiScans(Array.isArray(h) ? h.length : 0);
           }
+
+          // Platform KPIs not used for tenant
+          setKpiOrgs(0);
+          setKpiUsers(0);
         }
       } finally {
         setLoading(false);
@@ -99,24 +157,26 @@ export default function DashboardPage() {
     run();
   }, []);
 
+  const isPlatform = me?.user.role === "SUPER_ADMIN";
+
   return (
     <AppShell userEmail={me?.user.email} userRole={me?.user.role} onLogout={logout}>
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-  <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-  <span className="rounded-full border px-2 py-0.5 text-xs">
-    {me?.user.role === "SUPER_ADMIN" ? "Platform" : "Tenant"}
-  </span>
-</div>
-<p className="text-sm text-muted-foreground">
-  {me?.user.role === "SUPER_ADMIN"
-    ? "Pilotage plateforme — organisations, accès, conformité."
-    : "Vue tenant — clients KYC, scans, alertes, activité."}
-</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <span className="rounded-full border px-2 py-0.5 text-xs">
+              {isPlatform ? "Platform" : "Tenant"}
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isPlatform
+              ? "Pilotage plateforme — organisations, accès, conformité."
+              : "Vue tenant — clients KYC, scans, alertes, activité."}
+          </p>
         </div>
 
-        {me?.user.role !== "SUPER_ADMIN" ? (
+        {!isPlatform ? (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => (window.location.href = "/clients")}>
               Clients
@@ -138,35 +198,49 @@ export default function DashboardPage() {
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Organisation</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {isPlatform ? "Organisations" : "Organisation"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">{loading ? "…" : (me?.organization.id ?? "N/A")}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Tenant actif</div>
+            <div className="text-2xl font-semibold">
+              {loading ? "…" : isPlatform ? kpiOrgs : (me?.organization.id ?? "N/A")}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {isPlatform ? "Tenants (plateforme)" : "Tenant actif"}
+            </div>
           </CardContent>
         </Card>
 
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Clients</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {isPlatform ? "Utilisateurs" : "Clients"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {loading ? "…" : me?.user.role === "SUPER_ADMIN" ? "—" : kpiClients}
+              {loading ? "…" : isPlatform ? kpiUsers : kpiClients}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">Total KYC</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {isPlatform ? "Tous tenants confondus" : "Total KYC"}
+            </div>
           </CardContent>
         </Card>
 
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Alertes ouvertes</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {isPlatform ? "Alertes (tenants)" : "Alertes ouvertes"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {loading ? "…" : me?.user.role === "SUPER_ADMIN" ? "—" : kpiAlertsOpen}
+              {loading ? "…" : isPlatform ? "—" : kpiAlertsOpen}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">Case management</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {isPlatform ? "Case management (vue globale)" : "Case management"}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -175,13 +249,17 @@ export default function DashboardPage() {
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card className="rounded-2xl md:col-span-1">
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Scans</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {isPlatform ? "Activité" : "Scans"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {loading ? "…" : me?.user.role === "SUPER_ADMIN" ? "—" : kpiScans}
+              {loading ? "…" : isPlatform ? "—" : kpiScans}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">Historique</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {isPlatform ? "Audit (à brancher)" : "Historique"}
+            </div>
           </CardContent>
         </Card>
 
@@ -191,9 +269,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-semibold">{loading ? "…" : (me?.user.role ?? "—")}</div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {me?.user.role === "SUPER_ADMIN" ? "Plateforme" : "Tenant"}
-            </div>
+            <div className="mt-1 text-xs text-muted-foreground">{isPlatform ? "Plateforme" : "Tenant"}</div>
           </CardContent>
         </Card>
       </div>
@@ -202,12 +278,10 @@ export default function DashboardPage() {
       <div className="mt-6">
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle className="text-base">
-              {me?.user.role === "SUPER_ADMIN" ? "Platform actions" : "Quick actions"}
-            </CardTitle>
+            <CardTitle className="text-base">{isPlatform ? "Platform actions" : "Quick actions"}</CardTitle>
           </CardHeader>
 
-          {me?.user.role === "SUPER_ADMIN" ? (
+          {isPlatform ? (
             <CardContent className="flex flex-wrap gap-2">
               <Button onClick={() => (window.location.href = "/organizations")}>
                 Gérer les organisations

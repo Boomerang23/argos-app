@@ -18,25 +18,48 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-type NavItem = { href: string; label: string; desc?: string };
+type Role = "SUPER_ADMIN" | "ADMIN" | "AGENT";
+
+type NavItem = {
+  href: string;
+  label: string;
+  desc?: string;
+  roles: Role[];
+};
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", desc: "Vue globale" },
+  // Common
+  { href: "/dashboard", label: "Dashboard", desc: "Vue globale", roles: ["SUPER_ADMIN", "ADMIN", "AGENT"] },
+  { href: "/settings", label: "Settings", desc: "Sécurité & préférences", roles: ["SUPER_ADMIN", "ADMIN", "AGENT"] },
 
-  // Tenant only
-  { href: "/clients", label: "Clients", desc: "KYC", },
-  { href: "/alerts", label: "Alertes", desc: "Cases" },
+  // Tenant (ops)
+  { href: "/clients", label: "Clients", desc: "KYC", roles: ["ADMIN", "AGENT"] },
+  { href: "/alerts", label: "Alertes", desc: "Case management", roles: ["ADMIN", "AGENT"] },
 
-  // Platform only
-  { href: "/organizations", label: "Organisations", desc: "Tenants" },
+  // Platform
+  { href: "/organizations", label: "Organisations", desc: "Tenants", roles: ["SUPER_ADMIN"] },
 
-  { href: "/settings", label: "Settings", desc: "Sécurité & préférences" },
+  // (Tu ajouteras ensuite)
+  // { href: "/screening", label: "Screening", desc: "Listes & contrôles", roles: ["ADMIN", "AGENT"] },
+  // { href: "/audit", label: "Audit", desc: "Historique actions", roles: ["ADMIN", "AGENT"] },
+  // { href: "/platform/access", label: "Accès", desc: "Admins & rôles", roles: ["SUPER_ADMIN"] },
+  // { href: "/platform/audit", label: "Audit", desc: "Traçabilité", roles: ["SUPER_ADMIN"] },
 ];
 
 function getInitials(email?: string) {
   if (!email) return "U";
   const base = email.split("@")[0] ?? "U";
   return base.slice(0, 2).toUpperCase();
+}
+
+function getHeaderTitle(role?: string) {
+  return role === "SUPER_ADMIN" ? "Platform Console" : "Console";
+}
+
+function getHeaderSubtitle(role?: string) {
+  return role === "SUPER_ADMIN"
+    ? "Tenants • Access • Security • Audit"
+    : "KYC • Screening • Alerts • Audit";
 }
 
 function ThemeToggle() {
@@ -80,19 +103,19 @@ export default function AppShell({
   userEmail?: string;
   userRole?: string;
   onLogout?: () => void;
-}) {  const pathname = usePathname();
+}) {
+  const pathname = usePathname();
+
+  // sécurité: si userRole inconnu -> aucune section sensible
+  const role = (userRole ?? "") as Role;
+
+  const navByRole = useMemo(() => {
+    return NAV.filter((item) => item.roles.includes(role));
+  }, [role]);
 
   const active = useMemo(() => {
-    return NAV.find((n) => pathname?.startsWith(n.href))?.href ?? "/dashboard";
-  }, [pathname]);
-
-  const filteredNav = NAV.filter((item) => {
-  if (userRole === "SUPER_ADMIN") {
-    return item.href === "/dashboard" || item.href === "/organizations" || item.href === "/settings";
-  }
-  // tenant users
-  return item.href !== "/organizations";
-});
+    return navByRole.find((n) => pathname?.startsWith(n.href))?.href ?? "/dashboard";
+  }, [pathname, navByRole]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -116,7 +139,7 @@ export default function AppShell({
             <Separator className="my-4 hidden md:block" />
 
             <nav className="mt-2 grid gap-1">
-              {filteredNav.map((item) => {
+              {navByRole.map((item) => {
                 const isActive = active === item.href;
                 return (
                   <Link
@@ -154,10 +177,8 @@ export default function AppShell({
             <header className="sticky top-0 z-20 border-b bg-background/70 backdrop-blur">
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <div className="text-sm font-semibold">Console</div>
-                  <div className="text-xs text-muted-foreground">
-                    KYC • Screening • Alerts • Audit
-                  </div>
+                  <div className="text-sm font-semibold">{getHeaderTitle(userRole)}</div>
+                  <div className="text-xs text-muted-foreground">{getHeaderSubtitle(userRole)}</div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -171,10 +192,13 @@ export default function AppShell({
                           <div className="text-sm font-medium leading-none">
                             {userEmail ?? "User"}
                           </div>
-                          <div className="text-xs text-muted-foreground">Account</div>
+                          <div className="text-xs text-muted-foreground">
+                            {userRole === "SUPER_ADMIN" ? "Platform" : "Tenant"} account
+                          </div>
                         </div>
                       </button>
                     </DropdownMenuTrigger>
+
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem asChild>
                         <Link href="/settings">Settings</Link>

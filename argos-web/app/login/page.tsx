@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { getAccessToken, setAccessToken } from "@/lib/auth/session";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("admin");
   const [accessTokenState, setAccessTokenState] = useState<string>("");
   const [msg, setMsg] = useState<string>("");
+  const router = useRouter();
 
   async function onLogin() {
     setMsg("...");
@@ -38,6 +40,7 @@ export default function LoginPage() {
     setAccessToken(data.access_token ?? null);
     setAccessTokenState(data.access_token ?? "");
     setMsg("Login OK. Cookie refresh posé.");
+    router.replace("/dashboard");
   }
 
   async function onMe() {

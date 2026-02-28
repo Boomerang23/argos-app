@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, ForeignKey
+from sqlalchemy.orm import relationship
 from .database import Base
 import uuid
 from datetime import datetime
@@ -15,7 +16,7 @@ class Organization(Base):
 
 # --- 1) CLIENTS ---
 class Client(Base):
-    __tablename__ = "clients_v2"  # on garde tel quel pour ne pas casser ta table existante
+    __tablename__ = "clients_v2"
 
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     organization_id = Column(Integer, ForeignKey("organizations.id"), index=True, nullable=True)
@@ -25,7 +26,7 @@ class Client(Base):
     national_id = Column(String, unique=True, index=True)
     country_residence = Column(String)
 
-    # legacy: à terme tu peux le supprimer, mais on le garde pour compat
+    # legacy
     tenant_id = Column(String, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -46,7 +47,7 @@ class Sanction(Base):
     added_at = Column(DateTime, default=datetime.utcnow)
 
 
-# --- 3) UTILISATEURS (UNIQUE) ---
+# --- 3) UTILISATEURS ---
 class User(Base):
     __tablename__ = "users"
 
@@ -57,8 +58,10 @@ class User(Base):
     hashed_password = Column(String)
 
     full_name = Column(String)
-    role = Column(String, default="AGENT")  # "ADMIN" ou "AGENT"
+    role = Column(String, default="AGENT")  # ADMIN ou AGENT
     is_active = Column(Boolean, default=True)
+
+    alerts_assigned = relationship("Alert", back_populates="assigned_user")
 
 
 # --- 4) AUDIT LOGS ---
@@ -87,6 +90,7 @@ class ScanHistory(Base):
     status = Column(String)
     details = Column(String)
 
+
 # --- 6) LISTES CUSTOM ---
 class CustomList(Base):
     __tablename__ = "custom_lists"
@@ -107,9 +111,44 @@ class Alert(Base):
     similarity_score = Column(Float)
 
     status = Column(String, default="OUVERT")  # OUVERT, EN_COURS, FERME
-    decision = Column(String, nullable=True)   # FAUX_POSITIF / CONFIRME
+    decision = Column(String, nullable=True)  # FAUX_POSITIF / CONFIRME
     comments = Column(String, nullable=True)
 
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_user = relationship("User", back_populates="alerts_assigned")
+
+    # legacy (on garde temporairement)
     assigned_to = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
+
+    # ✅ Timeline
+    events = relationship(
+        "AlertEvent",
+        back_populates="alert",
+        cascade="all, delete-orphan",
+    )
+
+
+# --- 8) ALERT EVENTS (TIMELINE) ---
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    alert_id = Column(Integer, ForeignKey("alerts.id"), index=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_email = Column(String, nullable=False)
+
+    event_type = Column(String, nullable=False)
+    # ASSIGNED / STATUS_CHANGE / DECISION / COMMENT / CLOSED
+
+    old_value = Column(String, nullable=True)
+    new_value = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    alert = relationship("Alert", back_populates="events")
